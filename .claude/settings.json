@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "additionalDirectories": ["../on-stage"],
     "deny": [
       "Edit(../on-stage/**)",
       "Write(../on-stage/**)",
