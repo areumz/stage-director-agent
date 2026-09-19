@@ -49,6 +49,16 @@ def test_merge_does_not_return_the_fallback_object_itself():
     assert FALLBACK.spots.left.on is True
 
 
+def test_merge_ignores_ints_too_large_for_a_float():
+    # 파이썬 int 는 크기 제한이 없다. float 로 못 바꾸는 값은 타입이 틀린 값처럼 fallback 으로 떨어져야 한다.
+    # 예외를 던지지 않고 나머지 필드는 유지한다 (on-stage 와 다른 점: TS 에서는 Infinity 가 된다)
+    huge = 10**400
+    result = merge_stage_state({"color": "#111111", "spots": {"left": {"intensity": huge}}, "smoke": {"density": huge}}, FALLBACK)
+    assert result.color == "#111111"
+    assert result.spots.left.intensity == FALLBACK.spots.left.intensity
+    assert result.smoke.density == FALLBACK.smoke.density
+
+
 def test_clamp_leaves_valid_state_untouched():
     state = default_stage_state("#9F77DD")
     clamped, notes = clamp_stage_state(state, FALLBACK)

@@ -65,7 +65,14 @@ def default_stage_state(color: str) -> StageState:
 
 def _is_number(value: Any) -> bool:
     # TS 의 typeof v === "number". 파이썬에서 bool 은 int 의 하위 타입이라 명시적으로 제외한다.
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    # 파이썬 int 는 크기 제한이 없어 float 로 못 바꾸는 값이 있다. 그런 값은 타입이 틀린 것으로 본다.
+    try:
+        float(value)
+    except OverflowError:
+        return False
+    return True
 
 
 def _merge_spot(value: Any, fallback: SpotState) -> SpotState:
