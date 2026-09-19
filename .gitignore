@@ -7,3 +7,10 @@ venv/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.DS_Store
+
+# 데모 음원(Lyria 생성곡)은 이용 약관 확인 전까지 저장소에 올리지 않는다
+demo-tracks/
+
+# 코드까지 포함된 상세 실행 계획은 저장소에 올리지 않는다 (요약본은 코드 없이 별도 파일로 둔다)
+docs/superpowers/plans/detail*
