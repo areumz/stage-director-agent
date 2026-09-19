@@ -12,9 +12,7 @@ Proposals = dict[int, SequenceItem]
 
 def merge_proposals(left: Proposals | None, right: Proposals | None) -> Proposals:
     """LangGraph 리듀서. 같은 idx 는 right 가 이긴다. 입력은 수정하지 않는다."""
-    merged: Proposals = dict(left or {})
-    merged.update(right or {})
-    return merged
+    return {**(left or {}), **(right or {})}
 
 
 def apply_regeneration(existing: Proposals, regenerated: Proposals, targets: set[int]) -> Proposals:

@@ -4,7 +4,6 @@
 """
 
 import argparse
-import sys
 
 from stage_director.analysis.measure import measure_file
 
@@ -15,7 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     snapshot = measure_file(args.path)
-    sys.stdout.write(snapshot.model_dump_json(by_alias=True, indent=2) + "\n")
+    print(snapshot.model_dump_json(by_alias=True, indent=2))
     return 0
 
 

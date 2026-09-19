@@ -28,8 +28,7 @@ def measure_audio(y: np.ndarray, sr: int) -> AnalysisSnapshot:
     duration = float(len(y)) / sr
     n_bins = max(1, math.ceil(duration))
 
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=HOP_LENGTH)
-    beats = librosa.frames_to_time(beat_frames, sr=sr, hop_length=HOP_LENGTH)
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=HOP_LENGTH, units="time")
 
     rms = librosa.feature.rms(y=y, hop_length=HOP_LENGTH)[0]
     rms_times = librosa.times_like(rms, sr=sr, hop_length=HOP_LENGTH)
