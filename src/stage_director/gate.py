@@ -27,10 +27,16 @@ def brightness(state: StageState) -> float:
 
 
 def sanitize_state(raw: Any, fallback: StageState, idx: int) -> tuple[StageState, list[GateIssue]]:
-    """LLM 이 낸 state 를 필드별 병합 → clamp 한다 (스펙 §7 1층). 바꾼 값마다 이슈를 남긴다."""
+    """LLM 이 낸 state 를 필드별 병합 → clamp 한다 (스펙 §7 1층). 바꾼 값마다 이슈를 남긴다.
+
+    객체(dict)가 아닌 출력은 통째로 기본값이 되므로 `invalid_state` 이슈를 남겨 재생성 대상이 되게 한다.
+    객체 안의 일부 필드만 잘못된 경우는 필드별로 기본값이 되며 이슈를 남기지 않는다.
+    """
     merged = merge_stage_state(raw, fallback)
     clamped, notes = clamp_stage_state(merged, fallback)
     issues = [GateIssue(idx, "clamped", f"{n.path}: {n.original!r} -> {n.applied!r}") for n in notes]
+    if not isinstance(raw, dict):
+        issues.append(GateIssue(idx, "invalid_state", f"state 가 객체가 아니라 {type(raw).__name__} 이라 기본값으로 대체했다"))
     return clamped, issues
 
 

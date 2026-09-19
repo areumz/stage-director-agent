@@ -117,10 +117,22 @@ def test_sanitize_state_clamps_and_reports_each_change_with_the_section_index():
     assert len(issues) == 2
 
 
-def test_sanitize_state_with_garbage_input_falls_back_without_issues():
-    cleaned, issues = sanitize_state("nope", FALLBACK, idx=0)
+@pytest.mark.parametrize("garbage", ["nope", None, [1, 2], 5])
+def test_sanitize_state_records_an_issue_when_the_state_is_not_an_object(garbage):
+    # 쓸 수 없는 출력이 기본값으로 조용히 바뀌면 "LLM이 기본값을 골랐다"와 구별되지 않는다
+    cleaned, issues = sanitize_state(garbage, FALLBACK, idx=2)
     assert cleaned == FALLBACK
+    assert rules(issues) == [(2, "invalid_state")]
+
+
+def test_sanitize_state_records_no_issue_for_a_valid_object():
+    cleaned, issues = sanitize_state({"color": SIGNATURE}, FALLBACK, idx=0)
+    assert cleaned.color == SIGNATURE
     assert issues == []
+
+
+def test_sections_with_an_invalid_state_are_regenerated():
+    assert indices_to_regenerate([GateIssue(1, "invalid_state", "x")]) == {1}
 
 
 def test_indices_to_regenerate_skips_clamped_notes():
