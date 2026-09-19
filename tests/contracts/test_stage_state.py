@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from contracts.stage_state import (
+    CAMERAS,
+    HEX_COLOR,
     ClampNote,
     StageState,
     clamp_stage_state,
@@ -57,6 +59,17 @@ def test_merge_ignores_ints_too_large_for_a_float():
     assert result.color == "#111111"
     assert result.spots.left.intensity == FALLBACK.spots.left.intensity
     assert result.smoke.density == FALLBACK.smoke.density
+
+
+@pytest.mark.parametrize("value", ["#12345678", "#123456\n", "x#123456", "#12345"])
+def test_hex_color_matches_only_a_whole_value_with_match_and_search_too(value):
+    # 앵커가 없으면 .match/.search 를 쓰는 호출자가 "#12345678xyz" 같은 값을 통과시킨다
+    assert HEX_COLOR.match(value) is None
+    assert HEX_COLOR.search(value) is None
+
+
+def test_cameras_are_the_values_of_the_camera_type():
+    assert CAMERAS == ("front", "audience", "top")
 
 
 def test_clamp_leaves_valid_state_untouched():

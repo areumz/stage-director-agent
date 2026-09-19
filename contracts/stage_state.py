@@ -13,12 +13,12 @@
 
 import math
 import re
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, get_args
 
 from pydantic import BaseModel
 
 Camera = Literal["front", "audience", "top"]
-CAMERAS: tuple[str, ...] = ("front", "audience", "top")
+CAMERAS: tuple[str, ...] = get_args(Camera)
 
 
 # ── [A] on-stage 동작 ─────────────────────────────────────────
@@ -126,7 +126,7 @@ INTENSITY_RANGE = (0.0, 1000.0)
 ANGLE_RANGE = (0.1, 1.0)
 PENUMBRA_RANGE = (0.0, 1.0)
 DENSITY_RANGE = (0.0, 1.0)
-HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+HEX_COLOR = re.compile(r"\A#[0-9a-fA-F]{6}\Z")
 
 
 class ClampNote(NamedTuple):
