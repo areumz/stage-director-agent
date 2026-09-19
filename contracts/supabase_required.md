@@ -109,6 +109,7 @@ RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`. 쓰기 `user_id = auth.ui
 - 배열 순서 = 시간 순서, `startSec < endSec`
 - 첫 항목 `startSec = 0`, 마지막 `endSec = duration_sec`, `items[i].endSec == items[i+1].startSec`
 - `0 <= transitionMs <= (endSec - startSec) * 1000`
+- **경계 비교에는 ±1e-3초의 허용 오차를 둔다** (`TOLERANCE_SEC`, `src/stage_director/sequence.py`). 첫 `startSec`, 마지막 `endSec`, 인접 경계 `endSec == startSec` 세 비교 모두 같은 오차를 쓴다. on-stage 저장 검증도 같은 오차를 써야 Python 이 통과시킨 시퀀스가 저장 단계에서 거절되지 않는다.
 
 ### 음원 Storage 버킷
 
