@@ -1,0 +1,167 @@
+{
+  "_source": "on-stage src/lib/stageState.test.ts (케이스 1-8) 와 stageState.ts 의 코드 동작(케이스 9-10). 계약 README 참고",
+  "fallback": {
+    "color": "#9F77DD",
+    "spots": {
+      "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+      "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+      "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+    },
+    "camera": "front",
+    "smoke": { "density": 0, "color": "#ffffff" }
+  },
+  "cases": [
+    {
+      "name": "온전한 저장값은 그대로 복원 (stageState.test.ts: restores a fully valid saved state)",
+      "input": {
+        "color": "#378ADD",
+        "spots": {
+          "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "audience",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      },
+      "expected": {
+        "color": "#378ADD",
+        "spots": {
+          "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "audience",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      }
+    },
+    {
+      "name": "1차 저장값(spots가 boolean, angle 키): color만 유지, 나머지는 기본값 (stageState.test.ts)",
+      "input": {
+        "color": "#378ADD",
+        "spots": { "left": true, "center": true, "right": false },
+        "angle": "audience"
+      },
+      "expected": {
+        "color": "#378ADD",
+        "spots": {
+          "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "front",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      }
+    },
+    {
+      "name": "smoke 없는 v2 초기 저장값: smoke만 기본값 (stageState.test.ts)",
+      "input": {
+        "color": "#111111",
+        "spots": {
+          "left": { "on": false, "intensity": 500, "angle": 0.7, "penumbra": 0.2 },
+          "center": { "on": true, "intensity": 200, "angle": 0.3, "penumbra": 0.9 },
+          "right": { "on": true, "intensity": 100, "angle": 0.2, "penumbra": 0.1 }
+        },
+        "camera": "top"
+      },
+      "expected": {
+        "color": "#111111",
+        "spots": {
+          "left": { "on": false, "intensity": 500, "angle": 0.7, "penumbra": 0.2 },
+          "center": { "on": true, "intensity": 200, "angle": 0.3, "penumbra": 0.9 },
+          "right": { "on": true, "intensity": 100, "angle": 0.2, "penumbra": 0.1 }
+        },
+        "camera": "top",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      }
+    },
+    {
+      "name": "스팟에 on만 있으면 on은 유지, 나머지 3개 필드는 기본값 (stageState.test.ts)",
+      "input": {
+        "color": "#9F77DD",
+        "spots": {
+          "left": { "on": false },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "front",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      },
+      "expected": {
+        "color": "#9F77DD",
+        "spots": {
+          "left": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "front",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      }
+    },
+    {
+      "name": "camera가 열거값 밖이면 기본값 front, 나머지는 유지 (stageState.test.ts)",
+      "input": {
+        "color": "#9F77DD",
+        "spots": {
+          "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "diagonal",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      },
+      "expected": {
+        "color": "#9F77DD",
+        "spots": {
+          "left": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "front",
+        "smoke": { "density": 0, "color": "#ffffff" }
+      }
+    },
+    {
+      "name": "null이면 fallback (stageState.test.ts)",
+      "input": null,
+      "expected": "FALLBACK"
+    },
+    {
+      "name": "문자열이면 fallback (stageState.test.ts)",
+      "input": "nope",
+      "expected": "FALLBACK"
+    },
+    {
+      "name": "배열이면 인식되는 필드가 없어 전부 기본값 (stageState.test.ts)",
+      "input": [1, 2, 3],
+      "expected": "FALLBACK"
+    },
+    {
+      "name": "타입이 틀린 필드는 전부 기본값 (stageState.ts의 typeof 검사에서 도출. 문자열 '500', on: 1, null, bool 숫자)",
+      "input": {
+        "color": 123,
+        "spots": { "left": { "on": 1, "intensity": "500", "angle": null, "penumbra": true } },
+        "camera": 3,
+        "smoke": { "density": "0.5", "color": 7 }
+      },
+      "expected": "FALLBACK"
+    },
+    {
+      "name": "범위 밖 숫자와 hex 아닌 색은 그대로 통과 — on-stage 에는 clamp·hex 검증이 없다 (stageState.ts에서 도출, 알려진 공백)",
+      "input": {
+        "color": "not-a-color",
+        "spots": { "left": { "intensity": 5000, "angle": -2, "penumbra": 9 } },
+        "smoke": { "density": 7 }
+      },
+      "expected": {
+        "color": "not-a-color",
+        "spots": {
+          "left": { "on": true, "intensity": 5000, "angle": -2, "penumbra": 9 },
+          "center": { "on": true, "intensity": 300, "angle": 0.45, "penumbra": 0.6 },
+          "right": { "on": false, "intensity": 300, "angle": 0.45, "penumbra": 0.6 }
+        },
+        "camera": "front",
+        "smoke": { "density": 7, "color": "#ffffff" }
+      }
+    }
+  ]
+}
