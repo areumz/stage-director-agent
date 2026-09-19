@@ -61,6 +61,18 @@ def test_loud_section_may_exceed_the_calm_cap():
     assert run_gate([item(0, 30, state(900))], [1.8], SIGNATURE) == []
 
 
+def test_moderately_quiet_section_counts_as_calm():
+    # 실제 곡 2개의 인트로·breakdown 이 곡 평균의 0.72~0.83 이었다. 0.85 도 잔잔한 구간이어야 한다
+    items = [item(0, 30, state(CALM_MAX_INTENSITY + 100))]
+    assert rules(run_gate(items, [0.85], SIGNATURE)) == [(0, "calm_too_bright")]
+
+
+def test_section_at_the_track_average_is_not_calm():
+    # 같은 곡들의 일반 구간은 1.05 이상이었다. 평균(1.0)은 잔잔한 구간이 아니다
+    items = [item(0, 30, state(CALM_MAX_INTENSITY + 100))]
+    assert run_gate(items, [1.0], SIGNATURE) == []
+
+
 def test_energy_rising_while_brightness_falls_is_flagged_on_the_later_section():
     items = [item(0, 30, state(700)), item(30, 60, state(300))]
     assert (1, "energy_brightness_direction") in rules(run_gate(items, [1.0, 1.8], SIGNATURE))
