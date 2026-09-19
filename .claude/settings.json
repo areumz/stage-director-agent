@@ -5,7 +5,8 @@
       "Edit(../on-stage/**)",
       "Write(../on-stage/**)",
       "Bash(rm:../on-stage/**)",
-      "Bash(git -C ../on-stage *)"
+      "Bash(git -C ../on-stage *)",
+      "Read(../on-stage/**)"
     ]
   }
 }
