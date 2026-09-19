@@ -36,9 +36,27 @@ def test_parse_keeps_valid_fields_when_one_field_is_broken():
     assert parsed.onset_density == []
 
 
-def test_parse_drops_bad_list_elements_but_keeps_the_good_ones():
-    raw = {"energyCurve": [0.1, "x", None, True, float("nan"), float("inf"), 0.4]}
-    assert parse_analysis(raw).energy_curve == [0.1, 0.4]
+def test_parse_keeps_per_second_positions_by_zeroing_bad_elements():
+    # energyCurve/onsetDensity 는 인덱스가 곧 시각이다. 원소를 버리면 뒤의 초가 앞으로 당겨져 구간 에너지 비가 틀어진다
+    raw = {"energyCurve": [0.1, "x", None, True, float("nan"), float("inf"), 0.4], "onsetDensity": [2, None, 3]}
+    parsed = parse_analysis(raw)
+    assert parsed.energy_curve == [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4]
+    assert parsed.onset_density == [2.0, 0.0, 3.0]
+
+
+def test_parse_drops_bad_beat_timestamps_instead_of_inventing_beats_at_zero():
+    assert parse_analysis({"beatsSec": [0.5, "x", None, 1.0]}).beats_sec == [0.5, 1.0]
+
+
+def test_parse_survives_ints_too_large_for_a_float():
+    # 파이썬 int 는 크기 제한이 없어 float 로 바꾸면 OverflowError. 예외 없이 기본값으로 떨어져야 한다
+    huge = 10**400
+    parsed = parse_analysis({"durationSec": 10, "bpm": huge, "beatsSec": [0.5, huge], "energyCurve": [0.1, huge], "onsetDensity": [huge]})
+    assert parsed.duration_sec == 10
+    assert parsed.bpm == 0.0
+    assert parsed.beats_sec == [0.5]
+    assert parsed.energy_curve == [0.1, 0.0]
+    assert parsed.onset_density == [0.0]
 
 
 def test_parse_ignores_non_finite_scalars():

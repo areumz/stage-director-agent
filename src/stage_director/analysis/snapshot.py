@@ -24,27 +24,39 @@ class AnalysisSnapshot(BaseModel):
 
 
 def _finite_number(value: Any) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    try:
+        number = float(value)
+    except OverflowError:  # 파이썬 int 는 크기 제한이 없어 float 로 못 바꾸는 값이 있다
+        return None
+    return number if math.isfinite(number) else None
 
 
-def _number_list(value: Any) -> list[float]:
+def _timestamps(value: Any) -> list[float]:
+    """시각 목록(비트 위치). 잘못된 원소는 버린다. 0.0 으로 채우면 0초에 없는 비트가 생긴다."""
     if not isinstance(value, list):
         return []
     return [n for n in (_finite_number(v) for v in value) if n is not None]
 
 
+def _per_second(value: Any) -> list[float]:
+    """1초 구간별 값 목록. 인덱스가 곧 시각이라 잘못된 원소는 0.0 으로 채워 뒤의 초가 밀리지 않게 한다."""
+    if not isinstance(value, list):
+        return []
+    return [_finite_number(v) or 0.0 for v in value]
+
+
 def parse_analysis(raw: Any) -> AnalysisSnapshot:
-    """필드별 방어 파서. 없거나 타입이 틀린 필드는 기본값(0 또는 빈 리스트), 리스트의 잘못된 원소는 버린다."""
+    """필드별 방어 파서. 예외를 던지지 않는다. 없거나 타입이 틀린 필드는 기본값(0 또는 빈 리스트)."""
     if not isinstance(raw, dict):
         return AnalysisSnapshot()
     return AnalysisSnapshot(
         duration_sec=_finite_number(raw.get("durationSec")) or 0.0,
         bpm=_finite_number(raw.get("bpm")) or 0.0,
-        beats_sec=_number_list(raw.get("beatsSec")),
-        energy_curve=_number_list(raw.get("energyCurve")),
-        onset_density=_number_list(raw.get("onsetDensity")),
+        beats_sec=_timestamps(raw.get("beatsSec")),
+        energy_curve=_per_second(raw.get("energyCurve")),
+        onset_density=_per_second(raw.get("onsetDensity")),
     )
 
 
