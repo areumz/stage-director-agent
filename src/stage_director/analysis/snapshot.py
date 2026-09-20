@@ -59,7 +59,7 @@ def parse_analysis(raw: Any) -> AnalysisSnapshot:
 
 
 def section_energy_ratio(energy_curve: list[float], start_sec: float, end_sec: float) -> float:
-    """구간 평균 에너지 / 곡 평균 에너지 (기획서의 "곡 평균의 1.8배"). 1초 구간의 중심(i + 0.5)이 [start, end]에 든 것만 셈.
+    """구간 평균 에너지 / 곡 평균 에너지 (기획서의 "곡 평균의 1.8배"). 1초 구간의 중심(i + 0.5)이 [start, end)에 든 것만 셈.
 
     곡 평균이 0(무음)이거나 구간에 든 값이 없으면 1.0 (평균과 같다고 봄).
     """
