@@ -1,6 +1,6 @@
 """StageState 계약 — ../on-stage/src/lib/stageState.ts 의 파이썬 포트.
 
-이 파일에는 성격이 다른 두 부분이 있다. 섞지 말 것.
+A와 B는 성격이 다름. 섞기 금지.
 
 [A] on-stage 동작 (계약): 모델, default_stage_state, merge_stage_state.
     on-stage 의 stageState.ts / stageState.test.ts 와 같은 동작이어야 하며,
@@ -8,7 +8,7 @@
     (골든 벡터)로 이를 검증한다. on-stage 는 숫자 범위 clamp 와 hex 검증을 하지 않는다.
 
 [B] 이 프로젝트의 규칙 (계약 아님): clamp_stage_state.
-    on-stage 에 없는 범위·hex 방어. 스펙 §7 의 1층. 범위는 design-v2.md §5.3 슬라이더 범위.
+    on-stage 에 없는 범위·hex 방어.
 """
 
 import math
@@ -28,7 +28,7 @@ class SpotState(BaseModel):
     on: bool
     intensity: float
     angle: float
-    penumbra: float  # 씬(SpotLight)에는 아직 전달되지만 UI 슬라이더는 제거됨. 에이전트는 바꾸지 않는다.
+    penumbra: float  # 씬(SpotLight)에는 아직 전달되지만 UI 슬라이더는 제거됨. 에이전트는 바꾸지 않음.
 
 
 class Spots(BaseModel):
@@ -136,7 +136,7 @@ class ClampNote(NamedTuple):
 
 
 def clamp_stage_state(state: StageState, fallback: StageState) -> tuple[StageState, list[ClampNote]]:
-    """범위 밖 숫자는 clamp, 유한하지 않은 숫자·잘못된 hex 는 fallback 값으로 바꾸고 노트를 남긴다. 거부하지 않는다."""
+    """범위 밖 숫자는 clamp, 유한하지 않은 숫자·잘못된 hex 는 fallback 값으로 바꾸고 노트 남김 (거부 x)."""
     notes: list[ClampNote] = []
 
     def num(path: str, value: float, bounds: tuple[float, float], fb: float) -> float:

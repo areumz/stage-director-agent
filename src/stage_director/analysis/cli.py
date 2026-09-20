@@ -1,4 +1,4 @@
-"""1단계 분석 스파이크용 CLI: 음원 파일 하나를 분석해 JSON 을 stdout 으로 낸다 (육안 검토용).
+"""1단계 분석 스파이크용 CLI: 음원 파일 하나를 분석해 JSON 을 stdout 으로 내줌 (육안 검토용).
 
 사용: uv run python -m stage_director.analysis.cli path/to/song.mp3
 """

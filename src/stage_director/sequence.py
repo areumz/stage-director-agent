@@ -1,4 +1,4 @@
-"""시퀀스 항목 모델과 불변식 (스펙 §5). Python 검증 게이트와 Next.js 저장 직전이 같은 규칙을 쓴다."""
+"""시퀀스 항목 모델과 불변식. Python 검증 게이트와 Next.js 저장 직전이 같은 규칙을 씀."""
 
 from typing import NamedTuple
 
@@ -9,9 +9,8 @@ from contracts.stage_state import StageState
 
 TOLERANCE_SEC = 1e-3
 
-
 class SequenceItem(BaseModel):
-    """구간 1개. JSON 키는 스펙 §6 의 camelCase (sectionLabel, startSec, endSec, transitionMs)."""
+    """구간 1개 : 무대 연출 한 구간 데이터 모델 (시작 시간, 종료 시간, 전환 시간, 무대 상태 등)"""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -30,7 +29,7 @@ class Violation(NamedTuple):
 
 
 def validate_sequence(items: list[SequenceItem], duration_sec: float) -> list[Violation]:
-    """스펙 §5 불변식을 검사해 위반 목록을 돌려준다. 위반이 없으면 빈 리스트."""
+    """불변식을 검사해 위반 목록을 돌려줌. 위반이 없으면 빈 리스트."""
     if not items:
         return [Violation(None, "empty", "구간이 하나도 없다")]
 

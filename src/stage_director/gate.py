@@ -1,6 +1,6 @@
-"""검증 게이트의 결정적 규칙 (스펙 §7 의 1층 후처리와 2층).
+"""검증 게이트의 결정적 규칙.
 
-LLM 노드도 그래프도 모른다. 순수 함수만 둔다.
+LLM 노드도 그래프도 모르는 순수 함수.
 """
 
 from typing import Any, NamedTuple
@@ -8,8 +8,7 @@ from typing import Any, NamedTuple
 from contracts.stage_state import StageState, clamp_stage_state, merge_stage_state
 from stage_director.sequence import SequenceItem
 
-# 스펙 §7 은 "잔잔한 구간"과 "같은 방향"의 기준 수치를 정하지 않았다. 아래 세 값은 이 계획이 정한
-# 초기값이다. 1단계 스파이크에서 실제 곡으로 보고 조정한다.
+# 초기값. 1단계 스파이크에서 실제 곡으로 보고 조정.
 CALM_ENERGY_RATIO = 0.9  # 구간 평균 에너지 / 곡 평균 에너지가 이 값 이하면 잔잔한 구간. 실측 2곡: 잔잔한 구간 0.08~0.83, 일반 구간 1.05~1.37
 CALM_MAX_INTENSITY = 500.0  # 잔잔한 구간의 밝기 상한 (스펙 §7: 잔잔한 구간 밝기 <= 500)
 DIRECTION_EPS = 0.15  # 인접 구간의 에너지 비 변화가 이 값 이하면 방향 규칙을 적용하지 않는다
@@ -27,10 +26,10 @@ def brightness(state: StageState) -> float:
 
 
 def sanitize_state(raw: Any, fallback: StageState, idx: int) -> tuple[StageState, list[GateIssue]]:
-    """LLM 이 낸 state 를 필드별 병합 → clamp 한다 (스펙 §7 1층). 바꾼 값마다 이슈를 남긴다.
+    """LLM 이 낸 state 를 필드별 병합 → clamp. 바꾼 값마다 이슈를 남김.
 
-    객체(dict)가 아닌 출력은 통째로 기본값이 되므로 `invalid_state` 이슈를 남겨 재생성 대상이 되게 한다.
-    객체 안의 일부 필드만 잘못된 경우는 필드별로 기본값이 되며 이슈를 남기지 않는다.
+    객체(dict)가 아닌 출력은 통째로 기본값이 되므로 `invalid_state` 이슈를 남겨 재생성 대상이 되게함.
+    객체 안의 일부 필드만 잘못된 경우는 필드별로 기본값이 되며 이슈를 남기지 않음.
     """
     merged = merge_stage_state(raw, fallback)
     clamped, notes = clamp_stage_state(merged, fallback)
@@ -41,7 +40,7 @@ def sanitize_state(raw: Any, fallback: StageState, idx: int) -> tuple[StageState
 
 
 def run_gate(items: list[SequenceItem], energy_ratios: list[float], signature_color: str) -> list[GateIssue]:
-    """구간별 규칙 위반을 돌려준다. energy_ratios[i] 는 items[i] 구간 평균 에너지 / 곡 평균 에너지."""
+    """구간별 규칙 위반을 돌려줌. energy_ratios[i] 는 items[i] 구간 평균 에너지 / 곡 평균 에너지."""
     if len(items) != len(energy_ratios):
         raise ValueError(f"items({len(items)})와 energy_ratios({len(energy_ratios)})의 길이가 다르다")
 
@@ -66,5 +65,5 @@ def run_gate(items: list[SequenceItem], energy_ratios: list[float], signature_co
 
 
 def indices_to_regenerate(issues: list[GateIssue]) -> set[int]:
-    """자동 재생성 대상 구간. 이슈가 하나라도 있는 구간. 'clamped' 는 이미 고쳐졌으므로 제외한다."""
+    """자동 재생성 대상 구간. 이슈가 하나라도 있는 구간. 'clamped' 는 이미 고쳐졌으므로 제외."""
     return {issue.idx for issue in issues if issue.rule != "clamped"}

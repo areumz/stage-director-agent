@@ -1,7 +1,7 @@
-"""분석 결과 모델과 방어적 파서 (기획서 §5, 스펙 §6.3 의 context.analysis).
+"""분석 결과 모델과 방어적 파서.
 
-audio_tracks.analysis(jsonb)에 저장되는 모양이다. jsonb 는 손으로 고쳐지거나 버전이 달라질 수 있어서,
-mergeStageState 처럼 필드별로 방어하는 파서를 둔다: 필드 하나가 깨져도 나머지는 유지된다.
+audio_tracks.analysis(jsonb)에 저장되는 모양. jsonb 는 손으로 고쳐지거나 버전이 달라질 수 있어서,
+mergeStageState 처럼 필드별로 방어하는 파서를 둠: 필드 하나가 깨져도 나머지는 유지됨.
 """
 
 import math
@@ -12,8 +12,6 @@ from pydantic.alias_generators import to_camel
 
 
 class AnalysisSnapshot(BaseModel):
-    """JSON 키는 camelCase (durationSec, beatsSec, energyCurve, onsetDensity)."""
-
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     duration_sec: float = 0.0
@@ -34,14 +32,14 @@ def _finite_number(value: Any) -> float | None:
 
 
 def _timestamps(value: Any) -> list[float]:
-    """시각 목록(비트 위치). 잘못된 원소는 버린다. 0.0 으로 채우면 0초에 없는 비트가 생긴다."""
+    """시각 목록(비트 위치). 잘못된 원소는 버림. 0.0 으로 채우면 0초에 없는 비트가 생김."""
     if not isinstance(value, list):
         return []
     return [n for n in (_finite_number(v) for v in value) if n is not None]
 
 
 def _per_second(value: Any) -> list[float]:
-    """1초 구간별 값 목록. 인덱스가 곧 시각이라 잘못된 원소는 0.0 으로 채워 뒤의 초가 밀리지 않게 한다."""
+    """1초 구간별 값 목록. 인덱스가 곧 시각이라 잘못된 원소는 0.0 으로 채워 뒤의 초가 밀리지 않게함."""
     if not isinstance(value, list):
         return []
     return [_finite_number(v) or 0.0 for v in value]
@@ -61,9 +59,9 @@ def parse_analysis(raw: Any) -> AnalysisSnapshot:
 
 
 def section_energy_ratio(energy_curve: list[float], start_sec: float, end_sec: float) -> float:
-    """구간 평균 에너지 / 곡 평균 에너지 (기획서의 "곡 평균의 1.8배"). 1초 구간의 중심(i + 0.5)이 [start, end)에 든 것만 센다.
+    """구간 평균 에너지 / 곡 평균 에너지 (기획서의 "곡 평균의 1.8배"). 1초 구간의 중심(i + 0.5)이 [start, end]에 든 것만 셈.
 
-    곡 평균이 0(무음)이거나 구간에 든 값이 없으면 1.0 (평균과 같다고 본다).
+    곡 평균이 0(무음)이거나 구간에 든 값이 없으면 1.0 (평균과 같다고 봄).
     """
     if not energy_curve:
         return 1.0
