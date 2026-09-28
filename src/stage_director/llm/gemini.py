@@ -15,7 +15,7 @@ class GeminiClient:
     def __init__(self, api_key: str, model: str, client: Any = None):
         """client 는 테스트에서 SDK 대신 스텁을 넣는 자리. 운영에서는 api_key 로 만든다."""
         self._model = model
-        self._client = client or genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
+        self._client = client if client is not None else genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
 
     def generate_json(self, *, system: str, user: str, schema: dict[str, Any]) -> Any:
         config = types.GenerateContentConfig(

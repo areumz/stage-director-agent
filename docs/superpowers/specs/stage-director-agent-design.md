@@ -213,7 +213,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | interrupt/재개 | `InMemorySaver`로 그래프 흐름 테스트 + 전용 Postgres(docker)에서 프로세스 재시작 후 재개하는 통합 테스트 1건 |
 | 프로토콜 | FastAPI TestClient로 409/410/멱등성 |
 
-LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. 기본 가정은 무드 해석에 오디오 입력이 가능한 Gemini이며 1단계 스파이크 결과로 확정한다.
+LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. Gemini를 쓰며, 텍스트 입력 구조화 출력은 싱글 제안 계획에서 확정했고 오디오 입력 무드 해석은 시퀀스 그래프 계획에서 검증한다(§13).
 
 ## 10. `contracts/` 요건 (plan의 첫 태스크)
 

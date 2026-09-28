@@ -22,7 +22,7 @@ def _hex_color(value: str) -> str:
 
 
 class CamelModel(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, allow_inf_nan=False)
 
 
 class Shader(CamelModel):

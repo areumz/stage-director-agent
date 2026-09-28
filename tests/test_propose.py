@@ -141,7 +141,7 @@ def sent_prompts(**kwargs) -> tuple[str, str, dict]:
 
 def test_user_prompt_carries_measurements_and_context():
     _, user, _ = sent_prompts()
-    for fact in ["나만의 작은 우주", "몽환", "#9F77DD", "AURORA", "wave", "chorus", "10.0", "30.0", "120", "1.54", "잔잔한 인트로"]:
+    for fact in ["나만의 작은 우주", "몽환", "#9F77DD", "AURORA", "wave", "chorus", "10.0", "30.0", "120", "1.54", "1.45", "잔잔한 인트로"]:
         assert fact in user
 
 

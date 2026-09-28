@@ -11,7 +11,7 @@ from stage_director.analysis.snapshot import parse_analysis, section_energy_rati
 from stage_director.gate import run_gate, sanitize_state
 from stage_director.llm.client import LLMClient, LLMError
 from stage_director.models import Issue, ProposeRequest, SectionProposal
-from stage_director.prompts import PROPOSAL_SCHEMA, SPOT_KEYS, SYSTEM_PROMPT
+from stage_director.prompts import PROPOSAL_SCHEMA, SYSTEM_PROMPT
 from stage_director.sequence import SequenceItem
 
 MAX_RETRIES = 2  # 스펙 §8: 노드 단위 재시도 2회 (최초 시도 + 2회)

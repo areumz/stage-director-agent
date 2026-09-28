@@ -65,3 +65,10 @@ def test_rejects_bad_section_range(start, end):
 def test_rejects_unknown_shader_pattern():
     with pytest.raises(ValidationError):
         ProposeRequest.model_validate(body(artist={**BODY["artist"], "shader": {**BODY["artist"]["shader"], "pattern": "star"}}))
+
+
+@pytest.mark.parametrize("field", ["startSec", "endSec"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_rejects_non_finite_section_times(field, value):
+    with pytest.raises(ValidationError):
+        ProposeRequest.model_validate(body(section={"label": "chorus", "startSec": 10, "endSec": 30, field: value}))

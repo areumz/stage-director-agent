@@ -86,10 +86,32 @@ def test_invalid_body_is_422():
     assert client().post("/propose", json=body, headers=AUTH).status_code == 422
 
 
+@pytest.mark.parametrize("field", ["startSec", "endSec"])
+def test_nan_in_body_is_422_without_echoing_input(field):
+    # TestClient 의 json= 은 NaN 을 거부하므로 원문을 직접 보낸다 (json.dumps 는 NaN 을 그대로 쓴다)
+    body = {**BODY, "section": {**BODY["section"], field: float("nan")}}
+    headers = {**AUTH, "Content-Type": "application/json"}
+    response = client(LLM_OUTPUT).post("/propose", content=json.dumps(body), headers=headers)
+    assert response.status_code == 422
+    assert "input" not in response.text
+
+
+def test_422_detail_entries_have_only_loc_msg_type():
+    body = {**BODY, "artist": {**BODY["artist"], "color": "purple"}}
+    detail = client().post("/propose", json=body, headers=AUTH).json()["detail"]
+    assert detail and all(set(e) == {"loc", "msg", "type"} for e in detail)
+
+
 def test_llm_failure_is_502():
     response = client(LLMError("a"), LLMError("b"), LLMError("c")).post("/propose", json=BODY, headers=AUTH)
     assert response.status_code == 502
     assert response.json() == {"detail": "llm_failed"}
+
+
+@pytest.mark.parametrize("key", ["", "   "])
+def test_refuses_to_start_with_blank_internal_key(key):
+    with pytest.raises(ValueError):
+        create_app(Settings(internal_api_key=key, gemini_api_key="x", gemini_model="x"), FakeLLM())
 
 
 # ── Settings ──────────────────────────────────────────────────
