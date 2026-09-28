@@ -494,3 +494,25 @@ kill %1
 | 구조 분석 모델 미정, 오디오 입력 무드 해석 미검증 | 계획 3 첫 태스크(스파이크) |
 | 프리셋 저장(`POST /api/stage-presets`), Next.js 라우트, 레이트 리밋 | on-stage (스펙 §11) |
 | `POST /propose` 는 시퀀스 그래프가 생긴 뒤에도 남겨 둘지 계획 3 에서 정한다 | 계획 3 |
+
+
+---
+
+## 실행 후 변경 (최종 리뷰 반영)
+
+각 태스크의 `Expected` 통과 개수는 그 태스크를 처음 실행했을 때의 값이다. 전체 브랜치 리뷰를 반영해 아래를 고쳤고, 그 결과 **전체 154개 통과(5개는 `llm` 마커로 제외)**가 최종 상태다. 태스크별 리뷰는 모두 통과했고, 최종 리뷰의 Important 2건과 정리 항목을 한 번의 수정 커밋(`59cbb59`)으로 처리했다.
+
+| 변경 | 이유 | 테스트 변화 |
+| --- | --- | --- |
+| `CamelModel` 에 `allow_inf_nan=False`, `RequestValidationError` 핸들러 추가 (422 본문은 `{"detail": [{loc, msg, type}]}`, 입력값·ctx 는 되돌려주지 않음) | JSON 의 `NaN`/`Infinity` 가 `endSec: null` 로 200 이 되거나(구간 끝 검증 우회), 422 본문이 `nan` 을 되돌려주다 직렬화에 실패해 500 이 됐다 | models +4, api +2 |
+| `create_app` 이 비어 있거나 공백뿐인 `INTERNAL_API_KEY` 를 `ValueError` 로 거부 | `create_app(Settings(internal_api_key=""))` 나 `INTERNAL_API_KEY="   "` 이면 빈 헤더가 인증됐다 | api +2 |
+| 스펙 §13 아래 문단(216행)을 표와 맞춤 | 표는 갱신했는데 바로 아래 문장이 "1단계 스파이크 후 확정"으로 남아 모순이었다 | - |
+| `propose.py` 미사용 `SPOT_KEYS` import 제거, `GeminiClient` 의 `client if client is not None` | 정리 | - |
+| `test_propose.py` 사실 목록에 온셋 밀도 비 `"1.45"` 추가 | 프롬프트의 온셋 밀도 비 줄이 검증되지 않았다 | - |
+| `api.py` 동기 엔드포인트 `ponytail:` 주석에 최악 대기 시간(3회 × 60초 = 약 3분) 기록 | Next.js/Vercel 제한이 더 짧으면 `TIMEOUT_MS` 를 줄이거나 작업+폴링(스펙 D4)으로 옮긴다 | - |
+
+이 계획의 "이 계획이 정한 값" 표 중 "오류 본문은 FastAPI 기본 `{"detail": ...}`" 은 422 에 한해 위처럼 `detail` 항목이 `loc`·`msg`·`type` 만 남는 형태가 되었다.
+
+**보류(후속 계획에서 다룬다):** 재시도 사이 대기(backoff)와 `_generate` 명시적 return, `GeminiClient` 생성 경로(타임아웃) 테스트(Task 5 Step 6 실호출과 함께), 곡 제목·프리셋 이름 길이 상한(토큰 비용), `api.py` 의 `llm or GeminiClient(...)` 를 `is not None` 으로 통일, `ruff` 도입.
+
+**아직 실행하지 않은 것:** Task 5 Step 6(실제 Gemini 호출 확인). 기본 모델 ID(`gemini-3.8-flash`)와 프롬프트 품질은 이 단계가 끝나기 전까지 검증되지 않았다.
