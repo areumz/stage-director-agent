@@ -29,3 +29,5 @@ packages = ["src/stage_director", "contracts"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+markers = ["llm: 실제 LLM 을 호출한다. uv run --env-file .env pytest -m llm 으로만 돈다"]
+addopts = "-m 'not llm'"
