@@ -1,0 +1,113 @@
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from contracts.stage_state import default_stage_state, merge_stage_state
+from stage_director.api import create_app
+from stage_director.llm.client import LLMError
+from stage_director.llm.fake import FakeLLM
+from stage_director.settings import Settings
+
+BODY = json.loads((Path(__file__).parent / "fixtures" / "propose_request.json").read_text())
+KEY = "test-internal-key"
+AUTH = {"X-Internal-Key": KEY}
+
+LLM_OUTPUT = {
+    "state": {
+        "color": "#9F77DD",
+        "spots": {k: {"on": True, "intensity": 800, "angle": 0.5} for k in ("left", "center", "right")},
+        "camera": "audience",
+        "smoke": {"density": 0.4, "color": "#ffffff"},
+    },
+    "rationale": "코러스 에너지가 곡 평균의 1.5배라 밝게",
+}
+
+
+def client(*llm_responses) -> TestClient:
+    settings = Settings(internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused")
+    return TestClient(create_app(settings, FakeLLM(*llm_responses)))
+
+
+# ── X-Internal-Key ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-Internal-Key": "wrong"}, {"X-Internal-Key": ""}, {"X-Internal-Key": "키".encode()}])
+def test_rejects_missing_or_wrong_key(headers):
+    llm = FakeLLM(LLM_OUTPUT)
+    app = create_app(Settings(internal_api_key=KEY, gemini_api_key="x", gemini_model="x"), llm)
+    response = TestClient(app).post("/propose", json=BODY, headers=headers)
+    assert response.status_code == 401
+    assert llm.calls == []  # 인증 실패로 LLM 비용이 나가지 않는다
+
+
+def test_auth_is_checked_before_body_validation():
+    assert client().post("/propose", json={}).status_code == 401
+
+
+def test_docs_endpoints_are_not_exposed():
+    c = client()
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert c.get(path, headers=AUTH).status_code == 404
+
+
+# ── POST /propose ─────────────────────────────────────────────
+
+
+def test_propose_returns_camel_case_item_and_issues():
+    response = client(LLM_OUTPUT).post("/propose", json=BODY, headers=AUTH)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item"]["sectionLabel"] == "chorus"
+    assert (body["item"]["startSec"], body["item"]["endSec"], body["item"]["transitionMs"]) == (10, 30, 2000)
+    assert body["item"]["state"]["camera"] == "audience"
+    assert body["item"]["rationale"].startswith("코러스")
+    assert body["energyRatio"] == pytest.approx(1.538, abs=1e-3)
+    assert body["issues"] == []
+
+
+def test_returned_state_survives_the_on_stage_merge_unchanged():
+    # Next.js 가 이 state 를 프리셋 API 로 저장하고 씬이 mergeStageState 로 읽는다. 왕복해도 값이 변하면 안 된다 (penumbra 포함).
+    state = client(LLM_OUTPUT).post("/propose", json=BODY, headers=AUTH).json()["item"]["state"]
+    merged = merge_stage_state(state, default_stage_state("#000000"))
+    assert merged.model_dump() == state
+    assert state["spots"]["left"]["penumbra"] == 0.6
+
+
+def test_reports_gate_issues_in_the_response():
+    calm = {**BODY, "section": {"label": "intro", "startSec": 0, "endSec": 10}}
+    issues = client(LLM_OUTPUT).post("/propose", json=calm, headers=AUTH).json()["issues"]
+    assert [i["rule"] for i in issues] == ["calm_too_bright"]
+
+
+def test_invalid_body_is_422():
+    body = {**BODY, "artist": {**BODY["artist"], "color": "purple"}}
+    assert client().post("/propose", json=body, headers=AUTH).status_code == 422
+
+
+def test_llm_failure_is_502():
+    response = client(LLMError("a"), LLMError("b"), LLMError("c")).post("/propose", json=BODY, headers=AUTH)
+    assert response.status_code == 502
+    assert response.json() == {"detail": "llm_failed"}
+
+
+# ── Settings ──────────────────────────────────────────────────
+
+
+def test_settings_from_env(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    settings = Settings.from_env()
+    assert (settings.internal_api_key, settings.gemini_api_key) == ("k", "g")
+    assert settings.gemini_model  # 기본 모델이 있다
+
+
+@pytest.mark.parametrize("missing", ["INTERNAL_API_KEY", "GEMINI_API_KEY"])
+def test_settings_refuse_to_start_without_keys(monkeypatch, missing):
+    monkeypatch.setenv("INTERNAL_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv(missing, "")
+    with pytest.raises(RuntimeError, match=missing):
+        Settings.from_env()
