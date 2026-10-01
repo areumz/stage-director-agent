@@ -13,7 +13,7 @@ TIMEOUT_MS = 60_000
 
 class GeminiClient:
     def __init__(self, api_key: str, model: str, client: Any = None):
-        """client 는 테스트에서 SDK 대신 스텁을 넣는 자리. 운영에서는 api_key 로 만든다."""
+        """client : 테스트에서 SDK 대신 스텁을 넣는 자리. 운영에서는 api_key 로 만듦."""
         self._model = model
         self._client = client if client is not None else genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
 
@@ -26,5 +26,5 @@ class GeminiClient:
         try:
             response = self._client.models.generate_content(model=self._model, contents=user, config=config)
             return json.loads(response.text)
-        except Exception as e:  # SDK·네트워크·JSON 파싱 실패를 한 종류로 묶어 노드가 재시도하게 한다
+        except Exception as e:  # SDK·네트워크·JSON 파싱 실패를 한 종류로 묶어 노드가 재시도하게 함
             raise LLMError(f"{type(e).__name__}: {e}") from e

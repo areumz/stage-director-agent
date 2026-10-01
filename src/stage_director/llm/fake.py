@@ -1,11 +1,11 @@
-"""테스트용 결정적 가짜 LLM. 미리 넣어 둔 응답을 순서대로 돌려준다."""
+"""테스트용 결정적 가짜 LLM. 미리 넣어 둔 응답을 순서대로 돌려줌."""
 
 from typing import Any
 
 
 class FakeLLM:
     def __init__(self, *responses: Any):
-        """응답이 Exception 이면 돌려주는 대신 던진다 (재시도 테스트용)."""
+        """응답이 Exception 이면 돌려주는 대신 던짐 (재시도 테스트용)."""
         self._responses = list(responses)
         self.calls: list[dict[str, Any]] = []
 

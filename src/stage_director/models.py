@@ -1,8 +1,8 @@
 """싱글 제안의 요청·응답 모델. JSON 키는 camelCase.
 
-Python 은 Supabase 를 읽지 않으므로(스펙 §3) 곡·아티스트·프리셋·분석 결과를 전부 요청 본문으로 받는다.
+Python 은 Supabase 를 읽지 않으므로 곡·아티스트·프리셋·분석 결과를 전부 요청 본문으로 받음
 아티스트·프리셋 모양은 contracts/artist_context.md, contracts/api_stage_presets.md 를 따르며,
-Next.js 가 응답을 그대로 넘겨도 되도록 모르는 필드는 무시한다.
+Next.js 가 응답을 그대로 넘겨도 되도록 모르는 필드는 무시
 """
 
 from typing import Annotated, Any, Literal
@@ -42,7 +42,7 @@ class Artist(CamelModel):
 
 class Preset(CamelModel):
     name: str
-    state: Any  # 저장된 jsonb 그대로. StageState 모양이라는 보장이 없어 소비 전에 sanitize_state 를 거친다
+    state: Any  # 저장된 jsonb 그대로. StageState 모양이라는 보장이 없어 소비 전에 sanitize_state 를 거침
 
 
 class Track(CamelModel):

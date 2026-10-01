@@ -1,6 +1,6 @@
 """구간 하나 연출 노드: 구간 + 분석 + 아티스트 컨텍스트 -> StageState 1개(SequenceItem).
 
-LLM 만 주입받는 순수 함수. LangGraph 도 FastAPI 도 모른다. 3단계 그래프가 이 함수를 Send 노드로 감싼다.
+LLM 만 주입받는 순수 함수. LangGraph 도 FastAPI 도 모름. 이후 그래프가 이 함수를 Send 노드로 감쌈.
 """
 
 import json
@@ -15,12 +15,12 @@ from stage_director.prompts import PROPOSAL_SCHEMA, SYSTEM_PROMPT
 from stage_director.sequence import SequenceItem
 
 MAX_RETRIES = 2  # 스펙 §8: 노드 단위 재시도 2회 (최초 시도 + 2회)
-DEFAULT_TRANSITION_MS = 2000  # 스펙이 정하지 않은 값. 구간이 이보다 짧으면 구간 길이로 줄인다
+DEFAULT_TRANSITION_MS = 2000  # 구간이 이보다 짧으면 구간 길이로 줄인다
 MAX_PRESETS_IN_PROMPT = 10  # 프리셋이 많아도 프롬프트가 커지지 않게 앞에서부터 자른다
 
 
 def _without_penumbra(state: Any) -> Any:
-    """에이전트는 penumbra 를 바꾸지 않는다(스펙 §2). 모델이 보내도 버려서 기본값이 남게 한다."""
+    """에이전트는 penumbra 를 바꾸지 않음 (스펙 §2). 모델이 보내도 버려서 기본값이 남게 함."""
     if not isinstance(state, dict) or not isinstance(state.get("spots"), dict):
         return state
     spots = {k: ({f: v for f, v in s.items() if f != "penumbra"} if isinstance(s, dict) else s) for k, s in state["spots"].items()}
@@ -63,7 +63,7 @@ def _generate(llm: LLMClient, user: str) -> Any:
 
 
 def propose_section(llm: LLMClient, req: ProposeRequest) -> SectionProposal:
-    """구간 하나의 연출을 제안한다. LLM 이 재시도 후에도 실패하면 LLMError.
+    """구간 하나의 연출을 제안. LLM 이 재시도 후에도 실패하면 LLMError.
 
     LLM 출력은 믿지 않는다: 필드별 병합과 clamp(sanitize_state)를 거치고 게이트 규칙을 적용해
     문제를 issues 로 돌려준다. 자동 재생성은 하지 않는다(그래프의 몫).

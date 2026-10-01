@@ -34,7 +34,7 @@ def proposals():
 
 @pytest.mark.parametrize("label", SECTIONS)
 def test_no_gate_violations(proposals, label):
-    # clamp 는 이미 고쳐진 값이라 허용한다. 그 밖의 위반은 자동 재생성 대상이라 남아 있으면 프롬프트를 손봐야 한다
+    # clamp 는 이미 고쳐진 값이라 허용. 그 밖의 위반은 자동 재생성 대상이라 남아 있으면 프롬프트를 수정해야함
     assert [i for i in proposals[label].issues if i.rule != "clamped"] == []
 
 
