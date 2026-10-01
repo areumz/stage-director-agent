@@ -3,9 +3,7 @@
 결과는 확률적이라 값 자체가 아니라 게이트 규칙(스펙 §7 2층)을 지켰는지만 본다.
 """
 
-import json
 import os
-from pathlib import Path
 
 import pytest
 
@@ -14,10 +12,9 @@ from stage_director.llm.gemini import GeminiClient
 from stage_director.models import ProposeRequest
 from stage_director.propose import propose_section
 from stage_director.settings import DEFAULT_GEMINI_MODEL
+from tests.conftest import PROPOSE_REQUEST as FIXTURE
 
 pytestmark = pytest.mark.llm
-
-FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "propose_request.json").read_text())
 SECTIONS = {"intro": (0, 10), "chorus": (10, 30), "outro": (30, 40)}  # 에너지 비 0.31 / 1.54 / 0.62
 
 

@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,8 +8,9 @@ from stage_director.api import create_app
 from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
 from stage_director.settings import Settings
+from tests.conftest import PROPOSE_REQUEST
 
-BODY = json.loads((Path(__file__).parent / "fixtures" / "propose_request.json").read_text())
+BODY = PROPOSE_REQUEST
 KEY = "test-internal-key"
 AUTH = {"X-Internal-Key": KEY}
 
@@ -25,8 +25,8 @@ LLM_OUTPUT = {
 }
 
 
-def client(*llm_responses) -> TestClient:
-    settings = Settings(internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused")
+def client(*llm_responses, internal_api_key: str = KEY) -> TestClient:
+    settings = Settings(internal_api_key=internal_api_key, gemini_api_key="unused", gemini_model="unused")
     return TestClient(create_app(settings, FakeLLM(*llm_responses)))
 
 
@@ -36,7 +36,7 @@ def client(*llm_responses) -> TestClient:
 @pytest.mark.parametrize("headers", [{}, {"X-Internal-Key": "wrong"}, {"X-Internal-Key": ""}, {"X-Internal-Key": "키".encode()}])
 def test_rejects_missing_or_wrong_key(headers):
     llm = FakeLLM(LLM_OUTPUT)
-    app = create_app(Settings(internal_api_key=KEY, gemini_api_key="x", gemini_model="x"), llm)
+    app = create_app(Settings(internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused"), llm)
     response = TestClient(app).post("/propose", json=BODY, headers=headers)
     assert response.status_code == 401
     assert llm.calls == []  # 인증 실패로 LLM 비용이 나가지 않는다
@@ -111,7 +111,7 @@ def test_llm_failure_is_502():
 @pytest.mark.parametrize("key", ["", "   "])
 def test_refuses_to_start_with_blank_internal_key(key):
     with pytest.raises(ValueError):
-        create_app(Settings(internal_api_key=key, gemini_api_key="x", gemini_model="x"), FakeLLM())
+        client(internal_api_key=key)
 
 
 # ── Settings ──────────────────────────────────────────────────

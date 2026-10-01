@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import pytest
 
@@ -9,8 +8,7 @@ from stage_director.llm.fake import FakeLLM
 from stage_director.models import ProposeRequest
 from stage_director.propose import propose_section
 from stage_director.prompts import PROPOSAL_SCHEMA
-
-FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "propose_request.json").read_text())
+from tests.conftest import PROPOSE_REQUEST as FIXTURE
 
 
 def request(start=10, end=30, label="chorus", **patch) -> ProposeRequest:
