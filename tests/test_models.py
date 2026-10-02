@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from stage_director.models import ProposeRequest, SequenceRequest, SequenceResponse
+from stage_director.models import Issue, ProposeRequest, SequenceRequest, SequenceResponse
 
 BODY = {
     "track": {"title": "나만의 작은 우주", "genre": "K-pop", "moodKeywords": ["몽환", "벅찬"]},
@@ -99,6 +99,13 @@ def test_sequence_request_optional_fields_default():
     minimal = {"track": {"title": "t"}, "artist": BODY["artist"], "durationSec": 30}
     req = SequenceRequest.model_validate(minimal)
     assert req.presets == [] and req.analysis is None
+
+
+def test_issue_idx_defaults_to_none_and_serializes():
+    assert Issue(rule="clamped", message="m").idx is None
+    issue = Issue(rule="clamped", message="m", idx=2)
+    assert issue.idx == 2
+    assert issue.model_dump(mode="json", by_alias=True)["idx"] == 2
 
 
 def test_sequence_response_serializes_camel_case():

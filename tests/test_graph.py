@@ -79,6 +79,27 @@ def test_clamped_values_are_reported_but_not_regenerated():
     assert len(llm.calls) == 2
 
 
+def test_clamped_issue_carries_its_section_idx():
+    # clamped 는 propose_section 내부의 싱글 아이템 gate 호출에서 나와 자기 idx 가 항상 0이다 —
+    # assemble 은 바깥 루프의 진짜 구간 번호(여기서는 outro=1)를 붙여야 한다.
+    llm = FakeLLM(good_output(300), good_output(intensity=5000))
+    result = run(llm, analysis=TWO_SECTION_ANALYSIS)
+    clamped = [i for i in result["final_issues"] if i.rule == "clamped"]
+    assert clamped
+    assert all(i.idx == 1 for i in clamped)
+
+
+def test_gate_issues_carry_their_section_idx():
+    # 초기 + 재생성 2회 모두 같은 방식으로 어긋나 give-up 라운드에서도 calm_too_bright(idx0)와
+    # energy_brightness_direction(idx1)이 그대로 남는다 — run_gate 가 낸 idx 가 그대로 전달돼야 한다.
+    bad, other = good_output(intensity=900), good_output(intensity=800)
+    llm = FakeLLM(bad, other, bad, other, bad, other)
+    result = run(llm, analysis=TWO_SECTION_ANALYSIS)
+    by_rule = {i.rule: i for i in result["final_issues"]}
+    assert by_rule["calm_too_bright"].idx == 0
+    assert by_rule["energy_brightness_direction"].idx == 1
+
+
 # ── 자동 재생성 ──────────────────────────────────────────────
 
 

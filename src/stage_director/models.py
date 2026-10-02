@@ -84,6 +84,7 @@ class SequenceRequest(CamelModel):
 class Issue(CamelModel):
     rule: str
     message: str
+    idx: int | None = None  # 어느 구간의 이슈인지. 곡 전체 이슈(예: empty)는 None
 
 
 class SectionProposal(CamelModel):

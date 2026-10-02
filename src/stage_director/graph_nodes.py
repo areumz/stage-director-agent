@@ -54,7 +54,14 @@ def assemble_node(state: GraphState) -> dict:
     energy_ratios = [proposals[i].energy_ratio for i in order]
 
     # clamped/invalid_state 는 각 구간의 sanitize_state 결과다. run_gate 가 다시 내지 않으므로 그대로 들고 간다.
-    sanitize_issues = [iss for i in order for iss in proposals[i].issues if iss.rule in ("clamped", "invalid_state")]
+    # proposals[i].issues 자체의 idx 는 propose_section 내부 싱글 아이템 gate 호출의 산물이라 항상 0 —
+    # 여기서 바깥 루프의 진짜 구간 번호 i 를 붙여야 사람 리뷰 UI 가 구간을 가리킬 수 있다.
+    sanitize_issues = [
+        Issue(rule=iss.rule, message=iss.message, idx=i)
+        for i in order
+        for iss in proposals[i].issues
+        if iss.rule in ("clamped", "invalid_state")
+    ]
     gate_issues = run_gate(items, energy_ratios, req.artist.color)
     seq_violations = validate_sequence(items, req.duration_sec)
 
@@ -62,8 +69,8 @@ def assemble_node(state: GraphState) -> dict:
     # gate.py 의 의도대로 재생성 대상이 되려면 여기서 직접 regen_targets 에 합쳐야 한다.
     broken = {i for i in order if any(iss.rule == "invalid_state" for iss in proposals[i].issues)}
 
-    issues = sanitize_issues + [Issue(rule=i.rule, message=i.message) for i in gate_issues]
-    issues += [Issue(rule=f"sequence_{v.code}", message=v.message) for v in seq_violations]
+    issues = sanitize_issues + [Issue(rule=i.rule, message=i.message, idx=i.idx) for i in gate_issues]
+    issues += [Issue(rule=f"sequence_{v.code}", message=v.message, idx=v.idx) for v in seq_violations]
 
     return {
         "final_items": items,
