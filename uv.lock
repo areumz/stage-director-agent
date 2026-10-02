@@ -1573,7 +1573,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "google-genai", specifier = ">=2.25.0" },
-    { name = "langgraph", specifier = ">=1.2.12" },
+    { name = "langgraph", specifier = ">=1.2.12,<1.3" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.1.2" },
     { name = "librosa", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=2.5.3" },
