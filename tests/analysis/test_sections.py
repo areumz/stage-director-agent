@@ -1,6 +1,10 @@
-import pytest
+import itertools
 
-from stage_director.analysis.sections import MAX_SECTIONS, MIN_SECTION_SEC, detect_sections
+from stage_director.analysis.sections import (
+    MAX_SECTIONS,
+    MIN_SECTION_SEC,
+    detect_sections,
+)
 
 
 def flat(duration: int, value: float = 0.5) -> list[float]:
@@ -74,5 +78,23 @@ def test_sections_cover_whole_song_contiguously():
     sections = detect_sections(curve, duration_sec=60)
     assert sections[0].start_sec == 0
     assert sections[-1].end_sec == 60
-    for a, b in zip(sections, sections[1:]):
+    for a, b in itertools.pairwise(sections):
         assert a.end_sec == b.start_sec
+
+
+def test_zero_duration_does_not_throw():
+    # 예외를 던지지 않는다 — duration_sec <= 0 도 안전하게 처리
+    sections = detect_sections([], duration_sec=0)
+    assert len(sections) == 1
+    assert sections[0].start_sec == 0
+    # start_sec < end_sec 를 보장하기 위해 clamping됨
+    assert sections[0].end_sec > 0
+
+
+def test_negative_duration_does_not_throw():
+    # 예외를 던지지 않는다 — 음수 duration도 안전하게 처리
+    sections = detect_sections([], duration_sec=-10)
+    assert len(sections) == 1
+    assert sections[0].start_sec == 0
+    # 음수 duration도 처리 가능하도록 안전하게 보정됨
+    assert sections[0].end_sec > 0

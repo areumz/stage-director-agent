@@ -63,9 +63,12 @@ def detect_sections(energy_curve: list[float], duration_sec: float) -> list[Sect
     """에너지 곡선에서 구간 경계를 찾아 Section 목록을 돌려준다. 항상 길이 1 이상이며 이어진다.
 
     곡이 2*MIN_SECTION_SEC 보다 짧거나 에너지 곡선이 비어 있으면(분석 없음) 곡 전체를 구간 하나로 본다.
+    예외를 던지지 않는다 — duration_sec <= 0 도 안전하게 처리한다.
     """
     if duration_sec <= 2 * MIN_SECTION_SEC or not energy_curve:
-        return [Section(label="intro", start_sec=0.0, end_sec=duration_sec)]
+        # duration_sec 가 0 이하일 때 Section 검증을 통과시키기 위해 양수로 보정
+        safe_end = max(duration_sec, 1e-9)
+        return [Section(label="intro", start_sec=0.0, end_sec=safe_end)]
 
     boundaries = _suppress_close_candidates(_boundary_candidates(energy_curve, duration_sec))
     edges = [0.0, *(float(b) for b in boundaries), duration_sec]
