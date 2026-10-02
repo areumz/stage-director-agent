@@ -4,3 +4,4 @@ import json
 from pathlib import Path
 
 PROPOSE_REQUEST = json.loads((Path(__file__).parent / "fixtures" / "propose_request.json").read_text())
+SEQUENCE_REQUEST = json.loads((Path(__file__).parent / "fixtures" / "sequence_request.json").read_text())
