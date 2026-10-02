@@ -71,6 +71,16 @@ class ProposeRequest(CamelModel):
     section: Section
 
 
+class SequenceRequest(CamelModel):
+    """곡 전체 요청. `section` 대신 `duration_sec`을 받는다 — 구간은 그래프가 직접 나눈다."""
+
+    track: Track
+    artist: Artist
+    presets: list[Preset] = Field(default_factory=list)
+    analysis: Any = None
+    duration_sec: float = Field(gt=0)
+
+
 class Issue(CamelModel):
     rule: str
     message: str
@@ -79,4 +89,11 @@ class Issue(CamelModel):
 class SectionProposal(CamelModel):
     item: SequenceItem
     energy_ratio: float  # 구간 평균 에너지 / 곡 평균 에너지
+    issues: list[Issue]
+
+
+class SequenceResponse(CamelModel):
+    thread_id: str
+    sections: list[Section]
+    items: list[SequenceItem]
     issues: list[Issue]
