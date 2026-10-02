@@ -74,6 +74,11 @@ Python이 요청으로 받는 컨텍스트: 분석 JSON, 곡 메타(제목·장�
 | `POST /api/sequences/{id}/resume` | 본문 `{interruptId, kind: "sections"|"feedback"|"approve", payload}`. Python은 `waiting_input`이면서 `interruptId`가 현재 것과 같을 때만 받는다. 아니면 409 (더블 클릭·낡은 화면 방어) |
 | 승인 완료 | Python `done` 응답의 최종 시퀀스를 Next.js가 §7 검증 후 `items` 저장, `status=approved`, `approved_at=now()` |
 
+시퀀스 그래프 계획은 위 `/runs` 멱등 프로토콜 대신 잠정적인 `POST /sequence`(동기, 매 호출 새
+`threadId`)를 먼저 구현했다. 체크포인터·그래프 로직은 이미 이 엔드포인트 뒤에 있으므로, 4단계는
+`/runs`·`/runs/{threadId}`·`/resume`로 **엔드포인트만 교체**하면 된다(그래프 자체는 바뀌지 않고
+interrupt 두 개만 추가된다).
+
 Python 엔드포인트는 모두 `X-Internal-Key` 필수이며 키는 서버 환경변수에만 둔다. `POST /runs`는 같은 `threadId`로 다시 호출되면 멱등하다(이미 있으면 현재 상태 반환, 마지막 체크포인트에서 재개 필요 시에만 재실행).
 
 ## 5. 데이터 모델 (Supabase 신규)
