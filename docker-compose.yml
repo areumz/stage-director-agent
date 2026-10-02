@@ -1,0 +1,15 @@
+# 로컬 전용 LangGraph 체크포인터 Postgres. 배포 시에는 이 서비스를 안 쓰고 Neon(DATABASE_URL)을 쓴다 (스펙 D2).
+services:
+  checkpointer-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stage_director
+      POSTGRES_PASSWORD: stage_director
+      POSTGRES_DB: stage_director_checkpoints
+    ports:
+      - "5433:5432" # 5432 는 로컬에 이미 떠 있는 Postgres 와 겹칠 수 있어 5433 사용
+    volumes:
+      - checkpointer-data:/var/lib/postgresql/data
+
+volumes:
+  checkpointer-data:
