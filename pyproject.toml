@@ -4,14 +4,21 @@ version = "0.1.0"
 description = "무대 연출 디렉터 에이전트 (Python, LangGraph)"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.141.1",
+    "google-genai>=2.25.0",
     "librosa>=1.0.0",
     "numpy>=2.5.3",
     "pydantic>=2.7",
     "soundfile>=0.14.0",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "httpx2>=2.13.1",
+    "pytest>=8",
+    "ruff>=0.16.10",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -23,3 +30,5 @@ packages = ["src/stage_director", "contracts"]
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+markers = ["llm: 실제 LLM 을 호출한다. uv run --env-file .env pytest -m llm 으로만 돈다"]
+addopts = "-m 'not llm'"

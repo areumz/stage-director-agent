@@ -1,6 +1,10 @@
 import json
 
-from stage_director.analysis.snapshot import AnalysisSnapshot, parse_analysis, section_energy_ratio
+from stage_director.analysis.snapshot import (
+    AnalysisSnapshot,
+    parse_analysis,
+    section_energy_ratio,
+)
 
 
 def test_parse_restores_a_valid_camel_case_snapshot():
