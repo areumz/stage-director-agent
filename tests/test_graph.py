@@ -68,25 +68,18 @@ def test_two_section_song_produces_a_valid_contiguous_sequence():
 # ── 방어: LLM 출력은 믿지 않는다(싱글 제안 계획과 동일 원칙, 곡 전체에도 적용) ──
 
 
-def test_clamped_values_are_reported_but_not_regenerated():
+def test_clamped_values_are_reported_with_section_idx_but_not_regenerated():
     # intensity 5000 은 clamp(최대 1000, contracts.stage_state.INTENSITY_RANGE)되어 '값 자체'는 더
     # 이상 문제가 아니므로 재생성 대상이 아니다. outro(에너지 비 1.8, calm 아님)에 줘서 clamp 상한
     # (1000)이 calm_too_bright(밝기 <= 500) 규칙과 또 얽히지 않게 한다 — intro 는 calm-safe 값(300).
-    llm = FakeLLM(good_output(300), good_output(intensity=5000))
-    result = run(llm, analysis=TWO_SECTION_ANALYSIS)
-    assert any(i.rule == "clamped" for i in result["final_issues"])
-    assert result["regen_round"] == 1  # 재생성 없이 한 번에 끝난다
-    assert len(llm.calls) == 2
-
-
-def test_clamped_issue_carries_its_section_idx():
     # clamped 는 propose_section 내부의 싱글 아이템 gate 호출에서 나와 자기 idx 가 항상 0이다 —
     # assemble 은 바깥 루프의 진짜 구간 번호(여기서는 outro=1)를 붙여야 한다.
     llm = FakeLLM(good_output(300), good_output(intensity=5000))
     result = run(llm, analysis=TWO_SECTION_ANALYSIS)
     clamped = [i for i in result["final_issues"] if i.rule == "clamped"]
-    assert clamped
-    assert all(i.idx == 1 for i in clamped)
+    assert clamped and all(i.idx == 1 for i in clamped)
+    assert result["regen_round"] == 1  # 재생성 없이 한 번에 끝난다
+    assert len(llm.calls) == 2
 
 
 def test_gate_issues_carry_their_section_idx():
