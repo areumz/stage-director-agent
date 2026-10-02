@@ -71,7 +71,7 @@ def test_section_count_is_capped():
     # 10초 블록으로 0.1/0.9 를 30번 번갈아(300초) 켜면 JUMP_WINDOW_SEC(4초) 창 기준으로 매 경계마다
     # 진짜 에너지 점프가 생겨 MAX_SECTIONS 를 훌쩍 넘는 원시 후보가 나온다 — 상한이 실제로 작동해야
     # 통과한다(2초 주기 신호는 JUMP_WINDOW_SEC 창에서 좌우 평균이 같아져 후보가 0개가 되므로 쓰지 않는다).
-    curve = sum(([0.1 if i % 2 == 0 else 0.9] * 10 for i in range(30)), [])
+    curve = [0.1 if block % 2 == 0 else 0.9 for block in range(30) for _ in range(10)]
     sections = detect_sections(curve, duration_sec=300)
     assert len(sections) == MAX_SECTIONS
 

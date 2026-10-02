@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from stage_director.models import Issue, ProposeRequest, SequenceRequest, SequenceResponse
+from stage_director.models import (
+    Issue,
+    ProposeRequest,
+    SequenceRequest,
+    SequenceResponse,
+)
 
 BODY = {
     "track": {"title": "나만의 작은 우주", "genre": "K-pop", "moodKeywords": ["몽환", "벅찬"]},
