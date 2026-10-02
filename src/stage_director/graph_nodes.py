@@ -58,13 +58,17 @@ def assemble_node(state: GraphState) -> dict:
     gate_issues = run_gate(items, energy_ratios, req.artist.color)
     seq_violations = validate_sequence(items, req.duration_sec)
 
+    # invalid_state 는 run_gate(곡 전체 재검사)가 알지 못하는, 구간 자체의 sanitize_state 결과다.
+    # gate.py 의 의도대로 재생성 대상이 되려면 여기서 직접 regen_targets 에 합쳐야 한다.
+    broken = {i for i in order if any(iss.rule == "invalid_state" for iss in proposals[i].issues)}
+
     issues = sanitize_issues + [Issue(rule=i.rule, message=i.message) for i in gate_issues]
     issues += [Issue(rule=f"sequence_{v.code}", message=v.message) for v in seq_violations]
 
     return {
         "final_items": items,
         "final_issues": issues,
-        "regen_targets": indices_to_regenerate(gate_issues),
+        "regen_targets": indices_to_regenerate(gate_issues) | broken,
         "regen_round": state.get("regen_round", 0) + 1,
     }
 

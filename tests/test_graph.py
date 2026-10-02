@@ -109,6 +109,19 @@ def test_regen_gives_up_after_max_rounds_but_still_returns_a_usable_sequence():
 # ── LLM 실패 ──────────────────────────────────────────────────
 
 
+def test_invalid_state_triggers_regeneration():
+    # idx0(intro)의 state 가 객체가 아니면 sanitize_state 가 fallback + invalid_state 이슈를 남긴다.
+    # fallback 자체는 gate 규칙을 통과하므로 run_gate 는 아무 것도 잡지 못한다 — invalid_state 는
+    # gate_issues 가 아니라 proposal.issues 로만 존재하므로, assemble 이 이를 직접 regen_targets 에
+    # 반영하지 않으면 재생성 없이 fallback 상태가 그대로 최종 결과가 된다.
+    bad_state_response = {"state": "nope", "rationale": "모델 출력이 깨졌다"}
+    llm = FakeLLM(bad_state_response, good_output(), good_output(300))
+    result = run(llm, analysis=TWO_SECTION_ANALYSIS)
+    assert len(llm.calls) == 3  # idx0 가 재생성됐다 (초기 2 + 재생성 1)
+    assert result["regen_round"] == 2
+    assert result["final_issues"] == []
+
+
 def test_llm_error_propagates_out_of_the_graph():
     llm = FakeLLM(LLMError("a"), LLMError("b"), LLMError("c"))
     with pytest.raises(LLMError):
