@@ -6,8 +6,8 @@ from contracts.stage_state import default_stage_state
 from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
 from stage_director.models import ProposeRequest
-from stage_director.propose import propose_section
 from stage_director.prompts import PROPOSAL_SCHEMA
+from stage_director.propose import propose_section
 from tests.conftest import PROPOSE_REQUEST as FIXTURE
 
 
