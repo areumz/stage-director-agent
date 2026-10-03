@@ -1,6 +1,6 @@
-"""LangGraph 체크포인터. 전용 Postgres(로컬 docker-compose, 배포 시 Neon) (스펙 D2).
+"""LangGraph 체크포인터. 전용 Postgres(로컬 docker-compose, 배포 시 Neon)
 
-Python 코드의 나머지 부분은 체크포인터 종류를 모른다: 테스트는 InMemorySaver, 운영은 이 Postgres 어댑터.
+Python 코드의 나머지 부분은 체크포인터 종류를 모름: 테스트는 InMemorySaver, 운영은 이 Postgres 어댑터.
 """
 
 from collections.abc import Iterator

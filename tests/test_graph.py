@@ -34,9 +34,8 @@ def request(duration: float, analysis: dict | None = None) -> SequenceRequest:
 
 def run(llm, duration: float = 40, analysis: dict | None = None):
     graph = build_sequence_graph(llm)
-    # max_concurrency 는 FakeLLM 의 순서 보장 동작과는 무관하다(동시성 자체는 자동 테스트로 확인하지
-    # 않는다 — Task 6 사람 단계에서 실제 Gemini 호출로 429 가 뜨는지 본다). 여기서는 운영과 같은
-    # config 로 호출 경로가 깨지지 않는지만 확인한다.
+    # max_concurrency 는 FakeLLM 의 순서 보장 동작과는 무관하다(동시성 자체는 자동 테스트로 확인하지 x)
+    # 여기서는 운영과 같은 config 로 호출 경로가 깨지지 않는지만 확인
     config = {"configurable": {"thread_id": "t1"}, "max_concurrency": MAX_CONCURRENT_PROPOSALS}
     return graph.invoke({"request": request(duration, analysis)}, config=config)
 
@@ -55,8 +54,8 @@ def test_short_song_produces_a_single_item_covering_the_whole_duration():
 
 
 def test_two_section_song_produces_a_valid_contiguous_sequence():
-    # intro(에너지 비 0.2, calm)는 밝기 500 이하여야 calm_too_bright 를 피한다(스펙 §7, gate.py
-    # CALM_MAX_INTENSITY). good_output() 기본값 800 은 calm 구간엔 너무 밝으므로 intro 에는 300 을 쓴다.
+    # intro(에너지 비 0.2, calm)는 밝기 500 이하여야 calm_too_bright 를 피할 수 있음(스펙 §7, gate.py
+    # CALM_MAX_INTENSITY). good_output() 기본값 800 은 calm 구간엔 너무 밝으므로 intro 에는 300 을 씀
     result = run(FakeLLM(good_output(300), good_output()), analysis=TWO_SECTION_ANALYSIS)
     items = result["final_items"]
     assert len(items) == 2
@@ -70,10 +69,7 @@ def test_two_section_song_produces_a_valid_contiguous_sequence():
 
 def test_clamped_values_are_reported_with_section_idx_but_not_regenerated():
     # intensity 5000 은 clamp(최대 1000, contracts.stage_state.INTENSITY_RANGE)되어 '값 자체'는 더
-    # 이상 문제가 아니므로 재생성 대상이 아니다. outro(에너지 비 1.8, calm 아님)에 줘서 clamp 상한
-    # (1000)이 calm_too_bright(밝기 <= 500) 규칙과 또 얽히지 않게 한다 — intro 는 calm-safe 값(300).
-    # clamped 는 propose_section 내부의 싱글 아이템 gate 호출에서 나와 자기 idx 가 항상 0이다 —
-    # assemble 은 바깥 루프의 진짜 구간 번호(여기서는 outro=1)를 붙여야 한다.
+    # 이상 문제가 아니므로 재생성 대상이 아님. 
     llm = FakeLLM(good_output(300), good_output(intensity=5000))
     result = run(llm, analysis=TWO_SECTION_ANALYSIS)
     clamped = [i for i in result["final_issues"] if i.rule == "clamped"]
@@ -84,7 +80,7 @@ def test_clamped_values_are_reported_with_section_idx_but_not_regenerated():
 
 def test_gate_issues_carry_their_section_idx():
     # 초기 + 재생성 2회 모두 같은 방식으로 어긋나 give-up 라운드에서도 calm_too_bright(idx0)와
-    # energy_brightness_direction(idx1)이 그대로 남는다 — run_gate 가 낸 idx 가 그대로 전달돼야 한다.
+    # energy_brightness_direction(idx1)이 그대로 남음 — run_gate 가 낸 idx 가 그대로 전달돼야 함
     bad, other = good_output(intensity=900), good_output(intensity=800)
     llm = FakeLLM(bad, other, bad, other, bad, other)
     result = run(llm, analysis=TWO_SECTION_ANALYSIS)
@@ -124,10 +120,8 @@ def test_regen_gives_up_after_max_rounds_but_still_returns_a_usable_sequence():
 
 
 def test_invalid_state_triggers_regeneration():
-    # idx0(intro)의 state 가 객체가 아니면 sanitize_state 가 fallback + invalid_state 이슈를 남긴다.
-    # fallback 자체는 gate 규칙을 통과하므로 run_gate 는 아무 것도 잡지 못한다 — invalid_state 는
-    # gate_issues 가 아니라 proposal.issues 로만 존재하므로, assemble 이 이를 직접 regen_targets 에
-    # 반영하지 않으면 재생성 없이 fallback 상태가 그대로 최종 결과가 된다.
+    # idx0(intro)의 state 가 객체가 아니면 sanitize_state 가 fallback + invalid_state 이슈를 남김
+    # fallback 자체는 gate 규칙을 통과하므로 run_gate 는 아무 것도 잡지 못함 
     bad_state_response = {"state": "nope", "rationale": "모델 출력이 깨졌다"}
     llm = FakeLLM(bad_state_response, good_output(), good_output(300))
     result = run(llm, analysis=TWO_SECTION_ANALYSIS)

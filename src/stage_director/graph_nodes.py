@@ -1,4 +1,4 @@
-"""시퀀스 그래프의 노드와 라우팅 함수. 기존 propose_section/run_gate/validate_sequence 를 그대로 조합한다."""
+"""시퀀스 그래프의 노드와 라우팅 함수. 기존 propose_section/run_gate/validate_sequence 를 그대로 조합"""
 
 from langgraph.graph import END
 from langgraph.types import Send
@@ -16,8 +16,8 @@ MAX_SECTION_REGEN = 2  # 스펙 §7: 위반 구간은 최대 2회 자동 재생�
 
 # ponytail: Send 팬아웃이 구간 수만큼 한꺼번에 LLM 을 부르면 Gemini 무료 티어의 분당 요청 한도를
 # 바로 넘길 수 있다. invoke(config={"max_concurrency": ...})로 한 슈퍼스텝의 동시 실행 수만 묶는
-# 가장 단순한 완화책이며, 분당 요청 수(RPM)를 정확히 지키는 진짜 속도 제한·백오프는 아니다.
-# 필요해지면(실제 과금 티어가 정해지면) 토큰 버킷 등으로 올린다.
+# 가장 단순한 완화책이며, 분당 요청 수(RPM)를 정확히 지키는 진짜 속도 제한·백오프는 x
+# 필요해지면 토큰 버킷 등으로 올릴 것
 MAX_CONCURRENT_PROPOSALS = 3
 
 
@@ -53,9 +53,9 @@ def assemble_node(state: GraphState) -> dict:
     items = [proposals[i].item for i in order]
     energy_ratios = [proposals[i].energy_ratio for i in order]
 
-    # clamped/invalid_state 는 각 구간의 sanitize_state 결과다. run_gate 가 다시 내지 않으므로 그대로 들고 간다.
+    # clamped/invalid_state 는 각 구간의 sanitize_state 결과. run_gate 가 다시 내지 않으므로 그대로 들고감.
     # proposals[i].issues 자체의 idx 는 propose_section 내부 싱글 아이템 gate 호출의 산물이라 항상 0 —
-    # 여기서 바깥 루프의 진짜 구간 번호 i 를 붙여야 사람 리뷰 UI 가 구간을 가리킬 수 있다.
+    # 여기서 바깥 루프의 진짜 구간 번호 i 를 붙여야 사람 리뷰 UI 가 구간을 가리킬 수 있음.
     sanitize_issues = [
         Issue(rule=iss.rule, message=iss.message, idx=i)
         for i in order
@@ -65,8 +65,8 @@ def assemble_node(state: GraphState) -> dict:
     gate_issues = run_gate(items, energy_ratios, req.artist.color)
     seq_violations = validate_sequence(items, req.duration_sec)
 
-    # invalid_state 는 run_gate(곡 전체 재검사)가 알지 못하는, 구간 자체의 sanitize_state 결과다.
-    # gate.py 의 의도대로 재생성 대상이 되려면 여기서 직접 regen_targets 에 합쳐야 한다.
+    # invalid_state 는 run_gate(곡 전체 재검사)가 알지 못하는, 구간 자체의 sanitize_state 결과.
+    # gate.py 의 의도대로 재생성 대상이 되려면 여기서 직접 regen_targets 에 합쳐야함
     broken = {i for i in order if any(iss.rule == "invalid_state" for iss in proposals[i].issues)}
 
     issues = sanitize_issues + [Issue(rule=i.rule, message=i.message, idx=i.idx) for i in gate_issues]

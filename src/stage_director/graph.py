@@ -1,7 +1,4 @@
-"""시퀀스 그래프 조립. build_sequence_graph(llm, checkpointer) 가 LLM 과 체크포인터를 주입받는다.
-
-LangGraph 도 FastAPI 도 모르는 propose_section 과 달리, 이 파일은 LangGraph 를 안다 — 그래프 자체이기 때문이다.
-"""
+"""시퀀스 그래프 조립. build_sequence_graph(llm, checkpointer) 가 LLM 과 체크포인터를 주입받음"""
 
 from langgraph.graph import END, START, StateGraph
 

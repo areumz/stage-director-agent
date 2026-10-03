@@ -1,4 +1,4 @@
-"""Postgres 체크포인터 통합 테스트. 로컬 docker-compose 가 필요하다.
+"""Postgres 체크포인터 통합 테스트. 로컬 docker-compose 가 필요.
 
 실행: docker compose up -d checkpointer-db && uv run pytest -m postgres -q && docker compose down
 """
