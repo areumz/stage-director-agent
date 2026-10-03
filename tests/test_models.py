@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from stage_director.models import ProposeRequest
+from stage_director.models import (
+    Issue,
+    ProposeRequest,
+    SequenceRequest,
+    SequenceResponse,
+)
 
 BODY = {
     "track": {"title": "나만의 작은 우주", "genre": "K-pop", "moodKeywords": ["몽환", "벅찬"]},
@@ -72,3 +77,55 @@ def test_rejects_unknown_shader_pattern():
 def test_rejects_non_finite_section_times(field, value):
     with pytest.raises(ValidationError):
         ProposeRequest.model_validate(body(section={"label": "chorus", "startSec": 10, "endSec": 30, field: value}))
+
+
+SEQUENCE_BODY = {
+    "track": BODY["track"],
+    "artist": BODY["artist"],
+    "presets": [],
+    "analysis": {"durationSec": 60, "bpm": 120, "energyCurve": [0.1] * 30 + [0.9] * 30},
+    "durationSec": 60,
+}
+
+
+def test_sequence_request_parses_camel_case_body():
+    req = SequenceRequest.model_validate(SEQUENCE_BODY)
+    assert req.duration_sec == 60
+    assert req.track.title == BODY["track"]["title"]
+
+
+@pytest.mark.parametrize("duration", [0, -1])
+def test_sequence_request_rejects_non_positive_duration(duration):
+    with pytest.raises(ValidationError):
+        SequenceRequest.model_validate({**SEQUENCE_BODY, "durationSec": duration})
+
+
+def test_sequence_request_optional_fields_default():
+    minimal = {"track": {"title": "t"}, "artist": BODY["artist"], "durationSec": 30}
+    req = SequenceRequest.model_validate(minimal)
+    assert req.presets == [] and req.analysis is None
+
+
+def test_issue_idx_defaults_to_none_and_serializes():
+    assert Issue(rule="clamped", message="m").idx is None
+    issue = Issue(rule="clamped", message="m", idx=2)
+    assert issue.idx == 2
+    assert issue.model_dump(mode="json", by_alias=True)["idx"] == 2
+
+
+def test_sequence_response_serializes_camel_case():
+    from contracts.stage_state import default_stage_state
+    from stage_director.models import Section
+    from stage_director.sequence import SequenceItem
+
+    item = SequenceItem(
+        section_label="intro", start_sec=0, end_sec=30, transition_ms=2000,
+        state=default_stage_state("#9F77DD"), rationale="r",
+    )
+    response = SequenceResponse(
+        thread_id="t1", sections=[Section(label="intro", start_sec=0, end_sec=30)], items=[item], issues=[]
+    )
+    dumped = response.model_dump(mode="json", by_alias=True)
+    assert dumped["threadId"] == "t1"
+    assert dumped["sections"][0]["startSec"] == 0
+    assert dumped["items"][0]["sectionLabel"] == "intro"
