@@ -1,6 +1,6 @@
-"""시퀀스 그래프 상태 타입. LangGraph 가 이 TypedDict 를 보고 필드별 리듀서를 고른다.
+"""시퀀스 그래프 상태 타입. LangGraph 가 이 TypedDict 를 보고 필드별 리듀서를 고름.
 
-Annotated 가 없는 필드는 기본 리듀서(마지막으로 쓴 값으로 교체)를 쓴다 (스펙 §6.3 "교체").
+Annotated 가 없는 필드는 기본 리듀서(마지막으로 쓴 값으로 교체)를 씀 (스펙 §6.3 "교체").
 """
 
 from typing import Annotated, TypedDict

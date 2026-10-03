@@ -1,10 +1,9 @@
 """에너지 곡선 기반 구간 경계 휴리스틱 (스펙 §13).
 
-all-in-one 류 구조 분석 모델은 쓰지 않는다. 설치 위험(PyTorch 등 무거운 의존성, numpy 2.5 +
-Python 3.12 조합에서 막힐 수 있음)이 이 휴리스틱만 시도해 볼 근거다. 진짜 음악 구조(벌스/코러스)
-인식이 아니라 에너지 레벨 변화 지점을 구간 경계로 쓰는 근사치이며, label 도 내용 인식이 아니라
-상대적 에너지 수준에서 따온 이름이다. 아래 상수는 초기값이며, 실제 곡 2개로 듣고 조정하는 단계는
-이 계획의 Task 6(사람 단계)에서 한다 — 그때 이 docstring과 상수가 바뀔 수 있다.
+우선 all-in-one 류 구조 분석 모델은 쓰지 않는다 (설치 위험: PyTorch 등 무거운 의존성,
+numpy 2.5 + Python 3.12 조합에서 막힐 수 있음).
+진짜 음악 구조(벌스/코러스) 인식이 아니라 에너지 레벨 변화 지점을 구간 경계로 쓰는 근사치.
+label 도 내용 인식이 아니라 상대적 에너지 수준에서 따온 이름.
 """
 
 from stage_director.models import Section
@@ -60,10 +59,10 @@ def _label_for(idx: int, last_idx: int, energy_ratio: float) -> str:
 
 
 def detect_sections(energy_curve: list[float], duration_sec: float) -> list[Section]:
-    """에너지 곡선에서 구간 경계를 찾아 Section 목록을 돌려준다. 항상 길이 1 이상이며 이어진다.
+    """에너지 곡선에서 구간 경계를 찾아 Section 목록을 돌려줌. 항상 길이 1 이상이며 이어짐.
 
-    곡이 2*MIN_SECTION_SEC 보다 짧거나 에너지 곡선이 비어 있으면(분석 없음) 곡 전체를 구간 하나로 본다.
-    예외를 던지지 않는다 — duration_sec <= 0 도 안전하게 처리한다.
+    곡이 2*MIN_SECTION_SEC 보다 짧거나 에너지 곡선이 비어 있으면(분석 없음) 곡 전체를 구간 하나로 봄.
+    예외를 던지지 않음 — duration_sec <= 0 도 안전하게 처리.
     """
     if duration_sec <= 2 * MIN_SECTION_SEC or not energy_curve:
         # duration_sec 가 0 이하일 때 Section 검증을 통과시키기 위해 양수로 보정
