@@ -1,4 +1,4 @@
-"""환경변수 설정. 키가 없으면 서비스가 뜨지 않는다(빈 키로 인증이 열리는 것을 막는다)."""
+"""환경변수 설정"""
 
 import os
 from dataclasses import dataclass

@@ -46,7 +46,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # 체크포인터가 뜨지 않으면 서비스 전체가 기동에 실패한다(요청 단위가 아니라 서비스 단위 fail-fast).
+        # 체크포인터가 뜨지 않으면 서비스 전체가 기동에 실패
         with checkpointer_cm() as saver:
             app.state.sequence_graph = build_sequence_graph(llm, checkpointer=saver)
             yield
