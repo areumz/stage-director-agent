@@ -80,6 +80,8 @@ class ProposeRequest(CamelModel):
     presets: list[Preset] = Field(default_factory=list)
     analysis: Any = None  # audio_tracks.analysis jsonb. parse_analysis 가 필드별로 방어한다
     section: Section
+    feedback: str | None = Field(default=None, max_length=MAX_FEEDBACK_CHARS)  # interrupt #2 에서 사람이 쓴 수정 요청
+    previous: SequenceItem | None = None  # 피드백이 가리키는 직전 제안
 
 
 class SequenceRequest(CamelModel):

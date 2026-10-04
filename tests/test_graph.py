@@ -191,3 +191,14 @@ def test_mood_failure_does_not_block_the_run():
     _, _, result = start(llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=broken)
     assert [s["mood"] for s in result["__interrupt__"][0].value["sections"]] == ["", ""]
     assert llm.calls == []
+
+
+def test_user_edited_mood_reaches_the_propose_prompt():
+    llm = FakeLLM(good_output(300), good_output(300))
+    graph, config, _ = start(llm, analysis=TWO_SECTION_ANALYSIS)
+    edited = [
+        {"label": "intro", "startSec": 0, "endSec": 20, "mood": "쓸쓸한 새벽"},
+        {"label": "outro", "startSec": 20, "endSec": 40},
+    ]
+    graph.invoke(Command(resume={"sections": edited}), config)
+    assert any("분위기: 쓸쓸한 새벽" in c["user"] for c in llm.calls)

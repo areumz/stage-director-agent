@@ -206,3 +206,14 @@ def test_run_status_serializes_camel_case():
     assert dumped["threadId"] == "t1"
     assert dumped["interrupt"]["interruptId"] == "t1:0:confirm_sections"
     assert dumped["result"] is None and dumped["error"] is None
+
+
+def test_propose_request_accepts_feedback_and_previous_proposal():
+    from contracts.stage_state import default_stage_state
+
+    previous = {
+        "sectionLabel": "chorus", "startSec": 10, "endSec": 30, "transitionMs": 2000,
+        "state": default_stage_state("#9F77DD").model_dump(mode="json"), "rationale": "원본",
+    }
+    req = ProposeRequest.model_validate({**BODY, "feedback": "더 어둡게", "previous": previous})
+    assert req.feedback == "더 어둡게" and req.previous.rationale == "원본"

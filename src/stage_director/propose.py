@@ -44,12 +44,19 @@ def _user_prompt(req: ProposeRequest, bpm: float, energy_ratio: float, onset_rat
         "",
         "## 구간",
         f"라벨 {s.label}, {s.start_sec:.1f}초 ~ {s.end_sec:.1f}초 (길이 {s.end_sec - s.start_sec:.1f}초)",
+        *([f"분위기: {s.mood}"] if s.mood else []),
         "",
         "## 측정값",
         f"BPM {bpm:g}",
         f"에너지 비 {energy_ratio:.2f} (구간 평균 에너지 / 곡 평균 에너지)",
         f"온셋 밀도 비 {onset_ratio:.2f} (구간 평균 / 곡 평균)",
     ]
+    if req.feedback:
+        lines += ["", "## 사용자 피드백 (수정 요청)"]
+        if req.previous:
+            previous = req.previous.model_dump(mode="json", include={"state", "rationale"})
+            lines.append(f"이전 제안: {json.dumps(previous, ensure_ascii=False)}")
+        lines.append(f"피드백: {req.feedback}")
     return "\n".join(lines)
 
 
