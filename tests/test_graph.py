@@ -9,7 +9,7 @@ from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
 from stage_director.models import Artist, SequenceRequest, Shader, Track
 from stage_director.sequence import validate_sequence
-from tests.graph_helpers import drive
+from tests.graph_helpers import default_answer, drive
 
 ARTIST = Artist(
     slug="aurora", name="AURORA", name_ko="오로라", color="#9F77DD",
@@ -202,3 +202,78 @@ def test_user_edited_mood_reaches_the_propose_prompt():
     ]
     graph.invoke(Command(resume={"sections": edited}), config)
     assert any("분위기: 쓸쓸한 새벽" in c["user"] for c in llm.calls)
+
+
+# ── interrupt #2: 리뷰·피드백·승인 ───────────────────────────
+
+
+def to_review(llm, analysis=TWO_SECTION_ANALYSIS):
+    """구간은 그대로 확인하고 review interrupt 까지 진행한다."""
+    graph, config, result = start(llm, analysis=analysis)
+    result = graph.invoke(Command(resume=default_answer(result["__interrupt__"][0].value)), config)
+    return graph, config, result
+
+
+def feedback(text="더 밝게", targets=(1,)):
+    return Command(resume={"action": "feedback", "text": text, "targets": list(targets)})
+
+
+def test_pauses_at_review_with_items_and_issues():
+    _graph, _config, result = to_review(FakeLLM(good_output(300), good_output(300)))
+    value = result["__interrupt__"][0].value
+    assert value["kind"] == "review" and value["interruptId"] == "t1:1:review"
+    assert len(value["items"]) == 2 and value["items"][0]["sectionLabel"] == "intro"
+    assert value["issues"] == []
+
+
+def test_approve_finishes_the_graph():
+    graph, config, _ = to_review(FakeLLM(good_output(300), good_output(300)))
+    graph.invoke(Command(resume={"action": "approve"}), config)
+    state = graph.get_state(config)
+    assert state.next == ()
+    assert validate_sequence(state.values["final_items"], 40) == []
+
+
+def test_feedback_regenerates_only_the_targets_and_leaves_the_rest_byte_identical():
+    llm = FakeLLM(good_output(300), good_output(300), good_output(400))  # 세 번째 = idx1 재생성
+    graph, config, _ = to_review(llm)
+    before = graph.get_state(config).values["proposals"]
+    result = graph.invoke(feedback(targets=[1]), config)
+    after = graph.get_state(config).values["proposals"]
+    assert after[0].model_dump_json() == before[0].model_dump_json()  # 스펙 §6.3 부분 재생성 불변식
+    assert after[1].item.state.spots.left.intensity == 400
+    assert len(llm.calls) == 3
+    assert result["__interrupt__"][0].value["kind"] == "review"
+
+
+def test_feedback_text_and_previous_proposal_reach_the_prompt():
+    llm = FakeLLM(good_output(300), good_output(300), good_output(400))
+    graph, config, _ = to_review(llm)
+    graph.invoke(feedback(text="더 밝게", targets=[1]), config)
+    user = llm.calls[-1]["user"]
+    assert "피드백: 더 밝게" in user and "측정값에 맞춘 연출" in user  # 이전 제안의 rationale
+
+
+def test_interrupt_ids_are_unique_per_revision():
+    graph, config, first = start(FakeLLM(good_output(300), good_output(300), good_output(400)), analysis=TWO_SECTION_ANALYSIS)
+    ids = [first["__interrupt__"][0].value["interruptId"]]
+    second = graph.invoke(Command(resume=default_answer(first["__interrupt__"][0].value)), config)
+    ids.append(second["__interrupt__"][0].value["interruptId"])
+    third = graph.invoke(feedback(targets=[1]), config)
+    ids.append(third["__interrupt__"][0].value["interruptId"])
+    assert ids == ["t1:0:confirm_sections", "t1:1:review", "t1:2:review"]
+
+
+def test_feedback_turn_never_regenerates_sections_outside_the_targets():
+    bad, other = good_output(intensity=900), good_output(intensity=800)
+    # 최초 + 자동 재생성 2회(6회)는 give-up 테스트와 같은 시나리오: idx0 calm_too_bright, idx1 방향 위반이 남은 채 review 로 온다.
+    # 이어서 idx1 만 피드백하면 idx1 은 예산(최초 1 + 자동 2)만큼 다시 돌 수 있지만 idx0 은 게이트가 문제 삼아도 건드리지 않는다.
+    llm = FakeLLM(bad, other, bad, other, bad, other, other, other, other)
+    graph, config, _ = to_review(llm)
+    before = graph.get_state(config).values["proposals"]
+    result = graph.invoke(feedback(targets=[1]), config)
+    after = graph.get_state(config).values["proposals"]
+    assert after[0].model_dump_json() == before[0].model_dump_json()
+    assert len(llm.calls) == 9
+    issues = result["__interrupt__"][0].value["issues"]
+    assert any(i["rule"] == "calm_too_bright" and i["idx"] == 0 for i in issues)  # 남은 위반은 사람에게 보인다
