@@ -1,17 +1,23 @@
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
+from stage_director.audio import AudioError
 from stage_director.graph import build_sequence_graph
 from stage_director.graph_nodes import MAX_CONCURRENT_PROPOSALS
 from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
 from stage_director.models import Artist, SequenceRequest, Shader, Track
 from stage_director.sequence import validate_sequence
+from tests.graph_helpers import drive
 
 ARTIST = Artist(
     slug="aurora", name="AURORA", name_ko="오로라", color="#9F77DD",
     shader=Shader(pattern="wave", freq=9, falloff=0.75, speed=0.5),
 )
 TRACK = Track(title="나만의 작은 우주", genre="K-pop", mood_keywords=["몽환"])
+# max_concurrency 는 운영과 같은 config 로 호출 경로가 깨지지 않는지만 확인한다(동시성 자체는 자동 테스트 대상이 아님)
+CONFIG = {"configurable": {"thread_id": "t1"}, "max_concurrency": MAX_CONCURRENT_PROPOSALS}
 
 
 def good_output(intensity: int = 800) -> dict:
@@ -27,17 +33,21 @@ def good_output(intensity: int = 800) -> dict:
     }
 
 
-def request(duration: float, analysis: dict | None = None) -> SequenceRequest:
+def request(duration: float, analysis: dict | None = None, audio_url: str | None = None) -> SequenceRequest:
     analysis = analysis or {"durationSec": duration, "bpm": 120, "energyCurve": [0.5] * int(duration)}
-    return SequenceRequest(track=TRACK, artist=ARTIST, presets=[], analysis=analysis, duration_sec=duration)
+    return SequenceRequest(track=TRACK, artist=ARTIST, presets=[], analysis=analysis, duration_sec=duration, audio_url=audio_url)
 
 
-def run(llm, duration: float = 40, analysis: dict | None = None):
-    graph = build_sequence_graph(llm)
-    # max_concurrency 는 FakeLLM 의 순서 보장 동작과는 무관하다(동시성 자체는 자동 테스트로 확인하지 x)
-    # 여기서는 운영과 같은 config 로 호출 경로가 깨지지 않는지만 확인
-    config = {"configurable": {"thread_id": "t1"}, "max_concurrency": MAX_CONCURRENT_PROPOSALS}
-    return graph.invoke({"request": request(duration, analysis)}, config=config)
+def run(llm, duration: float = 40, analysis: dict | None = None, **graph_kwargs):
+    """interrupt 를 전부 기본 답으로 통과시켜 끝까지 돌리고 최종 상태 값을 돌려준다."""
+    graph = build_sequence_graph(llm, InMemorySaver(), **graph_kwargs)
+    return drive(graph, {"request": request(duration, analysis)}, CONFIG)
+
+
+def start(llm, duration: float = 40, analysis: dict | None = None, audio_url: str | None = None, **graph_kwargs):
+    """첫 interrupt 까지만 돌린다. (graph, config, invoke 결과)"""
+    graph = build_sequence_graph(llm, InMemorySaver(), **graph_kwargs)
+    return graph, CONFIG, graph.invoke({"request": request(duration, analysis, audio_url)}, CONFIG)
 
 
 TWO_SECTION_ANALYSIS = {"durationSec": 40, "bpm": 120, "energyCurve": [0.1] * 20 + [0.9] * 20}
@@ -134,3 +144,50 @@ def test_llm_error_propagates_out_of_the_graph():
     llm = FakeLLM(LLMError("a"), LLMError("b"), LLMError("c"))
     with pytest.raises(LLMError):
         run(llm, duration=10, analysis={"durationSec": 10, "bpm": 100, "energyCurve": [0.5] * 10})
+
+
+# ── interrupt #1: 구간 확인·수정 ─────────────────────────────
+
+
+def test_pauses_at_confirm_sections_before_any_proposal():
+    llm = FakeLLM()
+    _, _, result = start(llm, analysis=TWO_SECTION_ANALYSIS)
+    value = result["__interrupt__"][0].value
+    assert value["kind"] == "confirm_sections"
+    assert value["interruptId"] == "t1:0:confirm_sections"
+    assert [s["label"] for s in value["sections"]] == ["intro", "outro"]
+    assert value["durationSec"] == 40 and len(value["energyCurve"]) == 40
+    assert llm.calls == []  # 사람이 확인하기 전에는 LLM 을 부르지 않는다
+
+
+def test_resume_with_edited_sections_proposes_for_the_edited_boundaries():
+    llm = FakeLLM(good_output(300), good_output(300), good_output(300))
+    graph, config, _ = start(llm, analysis=TWO_SECTION_ANALYSIS)
+    edited = [
+        {"label": "intro", "startSec": 0, "endSec": 10},
+        {"label": "verse", "startSec": 10, "endSec": 20},
+        {"label": "outro", "startSec": 20, "endSec": 40},
+    ]
+    graph.invoke(Command(resume={"sections": edited}), config)
+    items = graph.get_state(config).values["final_items"]
+    assert [(i.section_label, i.start_sec, i.end_sec) for i in items] == [("intro", 0, 10), ("verse", 10, 20), ("outro", 20, 40)]
+    assert validate_sequence(items, 40) == []
+
+
+def test_mood_is_interpreted_before_the_pause():
+    llm = FakeLLM({"moods": ["잔잔", "폭발적"]})
+    _, _, result = start(
+        llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=lambda url: (b"audio", "audio/mpeg")
+    )
+    assert [s["mood"] for s in result["__interrupt__"][0].value["sections"]] == ["잔잔", "폭발적"]
+    assert llm.calls[0]["audio_bytes"] == 5
+
+
+def test_mood_failure_does_not_block_the_run():
+    def broken(url):
+        raise AudioError("down")
+
+    llm = FakeLLM()
+    _, _, result = start(llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=broken)
+    assert [s["mood"] for s in result["__interrupt__"][0].value["sections"]] == ["", ""]
+    assert llm.calls == []

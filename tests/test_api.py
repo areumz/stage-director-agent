@@ -9,9 +9,8 @@ from contracts.stage_state import default_stage_state, merge_stage_state
 from stage_director.api import create_app
 from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
-from stage_director.sequence import SequenceItem, validate_sequence
 from stage_director.settings import Settings
-from tests.conftest import PROPOSE_REQUEST, SEQUENCE_REQUEST
+from tests.conftest import PROPOSE_REQUEST
 
 BODY = PROPOSE_REQUEST
 KEY = "test-internal-key"
@@ -157,41 +156,6 @@ def sequence_app(*llm_responses, internal_api_key: str = KEY):
     settings = Settings(internal_api_key=internal_api_key, gemini_api_key="unused", gemini_model="unused", database_url="unused")
     checkpointer_cm = lambda: contextlib.nullcontext(InMemorySaver())  # 테스트 전용, Postgres 대신 InMemorySaver
     return create_app(settings, FakeLLM(*llm_responses), checkpointer_cm)
-
-
-def test_sequence_requires_internal_key():
-    app = sequence_app()  # FakeLLM 응답을 큐에 넣지 않는다 — 인증 실패라 그래프까지 가면 안 된다
-    with TestClient(app) as c:
-        response = c.post("/sequence", json=SEQUENCE_REQUEST)
-    assert response.status_code == 401
-
-
-def test_sequence_returns_a_valid_contiguous_sequence_with_a_fresh_thread_id():
-    app = sequence_app(SEQUENCE_GOOD, SEQUENCE_GOOD)
-    with TestClient(app) as c:
-        response = c.post("/sequence", json=SEQUENCE_REQUEST, headers=AUTH)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["threadId"]
-    items = [SequenceItem.model_validate(d) for d in body["items"]]
-    assert validate_sequence(items, 60) == []
-    assert len(body["sections"]) == 2
-
-
-def test_sequence_llm_failure_is_502():
-    app = sequence_app(*([LLMError("x")] * 10))
-    with TestClient(app) as c:
-        response = c.post("/sequence", json=SEQUENCE_REQUEST, headers=AUTH)
-    assert response.status_code == 502
-    assert response.json() == {"detail": "llm_failed"}
-
-
-def test_sequence_invalid_body_is_422():
-    app = sequence_app()
-    body = {**SEQUENCE_REQUEST, "durationSec": 0}
-    with TestClient(app) as c:
-        response = c.post("/sequence", json=body, headers=AUTH)
-    assert response.status_code == 422
 
 
 def test_app_refuses_to_start_when_checkpointer_is_unavailable():

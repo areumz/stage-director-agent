@@ -28,3 +28,4 @@ class GraphState(TypedDict, total=False):
     regen_targets: set[int]  # 가장 최근 assemble 이 재생성이 필요하다고 판단한 구간
     final_items: list[SequenceItem]  # assemble 이 실행될 때마다 최신값으로 덮어씀
     final_issues: list[Issue]
+    revision: int  # interrupt 노드가 resume 을 받을 때마다 1씩 증가. interruptId 생성에 쓰임 (스펙 §6.3)

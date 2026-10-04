@@ -1,14 +1,19 @@
 """시퀀스 그래프의 노드와 라우팅 함수. 기존 propose_section/run_gate/validate_sequence 를 그대로 조합"""
 
+from collections.abc import Callable
+
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 
 from stage_director.analysis.sections import detect_sections
 from stage_director.analysis.snapshot import parse_analysis
+from stage_director.audio import AudioError, fetch_audio
 from stage_director.gate import indices_to_regenerate, run_gate
 from stage_director.graph_state import GraphState, ProposeTask
 from stage_director.llm.client import LLMClient
-from stage_director.models import Issue, ProposeRequest
+from stage_director.models import Issue, ProposeRequest, Section
+from stage_director.mood import interpret_moods
 from stage_director.propose import propose_section
 from stage_director.sequence import validate_sequence
 
@@ -25,6 +30,47 @@ def detect_node(state: GraphState) -> dict:
     req = state["request"]
     snapshot = parse_analysis(req.analysis)
     return {"sections": detect_sections(snapshot.energy_curve, req.duration_sec)}
+
+
+def interrupt_id(config: RunnableConfig, revision: int, kind: str) -> str:
+    """스펙 §6.3: 낡은 화면에서 온 resume 을 거부하기 위한 id."""
+    return f"{config['configurable']['thread_id']}:{revision}:{kind}"
+
+
+def make_mood_node(llm: LLMClient, fetch: Callable[[str], tuple[bytes, str]] = fetch_audio):
+    """곡 전체 오디오로 구간 무드를 한 번에 해석한다. audioUrl 이 없거나 내려받기에 실패하면 무드 없이 진행(비치명적)."""
+
+    def mood_node(state: GraphState) -> dict:
+        req = state["request"]
+        if not req.audio_url:
+            return {}
+        try:
+            audio, mime_type = fetch(req.audio_url)
+        except AudioError:
+            return {}
+        moods = interpret_moods(llm, audio, mime_type, state["sections"], req.track)
+        return {"sections": [s.model_copy(update={"mood": m}) for s, m in zip(state["sections"], moods)]}
+
+    return mood_node
+
+
+def confirm_sections_node(state: GraphState, config: RunnableConfig) -> dict:
+    """interrupt #1: 사람이 구간 경계·라벨·무드를 확인·수정한다.
+
+    재개하면 이 노드가 처음부터 다시 실행된다 — interrupt() 앞에는 부수효과를 두지 않는다.
+    resume 값은 API 계층이 validate_section_edit 로 이미 검증했다.
+    """
+    revision = state.get("revision", 0)
+    answer = interrupt(
+        {
+            "interruptId": interrupt_id(config, revision, "confirm_sections"),
+            "kind": "confirm_sections",
+            "sections": [s.model_dump(by_alias=True) for s in state["sections"]],
+            "energyCurve": parse_analysis(state["request"].analysis).energy_curve,
+            "durationSec": state["request"].duration_sec,
+        }
+    )
+    return {"sections": [Section.model_validate(s) for s in answer["sections"]], "revision": revision + 1}
 
 
 def fan_out_initial(state: GraphState) -> list[Send]:
