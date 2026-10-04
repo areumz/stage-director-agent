@@ -1,9 +1,13 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from stage_director.models import (
     Issue,
     ProposeRequest,
+    ResumeRequest,
+    RunCreate,
+    RunStatus,
+    Section,
     SequenceRequest,
     SequenceResponse,
 )
@@ -129,3 +133,76 @@ def test_sequence_response_serializes_camel_case():
     assert dumped["threadId"] == "t1"
     assert dumped["sections"][0]["startSec"] == 0
     assert dumped["items"][0]["sectionLabel"] == "intro"
+
+
+# ── 4단계: 무드, 음원 URL, /runs ─────────────────────────────
+
+RESUME = TypeAdapter(ResumeRequest)
+
+
+def test_section_mood_defaults_to_empty():
+    assert Section(label="a", start_sec=0, end_sec=10).mood == ""
+
+
+def test_section_mood_is_capped():
+    with pytest.raises(ValidationError):
+        Section(label="a", start_sec=0, end_sec=10, mood="x" * 201)
+
+
+def test_sequence_request_audio_url_is_optional():
+    assert SequenceRequest.model_validate(SEQUENCE_BODY).audio_url is None
+    req = SequenceRequest.model_validate({**SEQUENCE_BODY, "audioUrl": "https://x/y.mp3"})
+    assert req.audio_url == "https://x/y.mp3"
+
+
+def test_run_create_parses_camel_case_body():
+    run = RunCreate.model_validate({"threadId": "t-1", "context": SEQUENCE_BODY})
+    assert run.thread_id == "t-1"
+    assert run.context.duration_sec == 60
+
+
+@pytest.mark.parametrize("thread_id", ["", "x" * 65])
+def test_run_create_rejects_bad_thread_id(thread_id):
+    with pytest.raises(ValidationError):
+        RunCreate.model_validate({"threadId": thread_id, "context": SEQUENCE_BODY})
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"interruptId": "t:0:confirm_sections", "kind": "sections", "payload": {"sections": [{"label": "a", "startSec": 0, "endSec": 30}]}},
+        {"interruptId": "t:1:review", "kind": "feedback", "payload": {"text": " 더 어둡게 ", "targets": [1]}},
+        {"interruptId": "t:1:review", "kind": "approve"},
+    ],
+)
+def test_resume_request_parses_each_kind(body):
+    parsed = RESUME.validate_python(body)
+    assert parsed.kind == body["kind"]
+    assert parsed.interrupt_id == body["interruptId"]
+
+
+def test_feedback_text_is_stripped():
+    parsed = RESUME.validate_python({"interruptId": "i", "kind": "feedback", "payload": {"text": " 더 어둡게 ", "targets": [1]}})
+    assert parsed.payload.text == "더 어둡게"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"text": "   ", "targets": [1]},
+        {"text": "x" * 501, "targets": [1]},
+        {"text": "ok", "targets": []},
+        {"text": "ok", "targets": [-1]},
+    ],
+)
+def test_feedback_resume_rejects_bad_payload(payload):
+    with pytest.raises(ValidationError):
+        RESUME.validate_python({"interruptId": "i", "kind": "feedback", "payload": payload})
+
+
+def test_run_status_serializes_camel_case():
+    status = RunStatus(thread_id="t1", status="waiting_input", interrupt={"interruptId": "t1:0:confirm_sections"})
+    dumped = status.model_dump(mode="json", by_alias=True)
+    assert dumped["threadId"] == "t1"
+    assert dumped["interrupt"]["interruptId"] == "t1:0:confirm_sections"
+    assert dumped["result"] is None and dumped["error"] is None
