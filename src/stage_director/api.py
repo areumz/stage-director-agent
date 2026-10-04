@@ -27,13 +27,7 @@ from stage_director.models import (
 )
 from stage_director.propose import propose_section
 from stage_director.retention import purge
-from stage_director.runner import (
-    MAX_CONCURRENT_RUNS,
-    InvalidResume,
-    RunConflict,
-    Runner,
-    RunNotFound,
-)
+from stage_director.runner import MAX_CONCURRENT_RUNS, RunError, Runner
 from stage_director.settings import Settings
 
 
@@ -79,17 +73,10 @@ def create_app(
         errors = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
         return JSONResponse(status_code=422, content={"detail": errors})
 
-    @app.exception_handler(RunNotFound)
-    async def _run_not_found(request, exc):
-        return JSONResponse(status_code=404, content={"detail": "thread_not_found"})
-
-    @app.exception_handler(RunConflict)
-    async def _run_conflict(request, exc):
-        return JSONResponse(status_code=409, content={"detail": exc.code})
-
-    @app.exception_handler(InvalidResume)
-    async def _invalid_resume(request, exc):
-        return JSONResponse(status_code=422, content={"detail": exc.code, "message": exc.message})
+    @app.exception_handler(RunError)
+    async def _run_error(request, exc):
+        content = {"detail": exc.code, **({"message": exc.message} if exc.message else {})}
+        return JSONResponse(status_code=exc.status, content=content)
 
     @app.post("/propose", dependencies=[Depends(require_internal_key)])
     def propose(req: ProposeRequest) -> SectionProposal:

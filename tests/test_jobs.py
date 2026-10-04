@@ -33,7 +33,7 @@ def test_create_starts_running_and_is_idempotent(store):
     assert store.create(job_id) is True
     assert store.create(job_id) is False
     job = store.get(job_id)
-    assert (job.status, job.kind, job.result, job.error) == ("running", "graph", None, None)
+    assert (job.status, job.result, job.error) == ("running", None, None)
 
 
 def test_get_unknown_returns_none(store):

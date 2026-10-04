@@ -15,11 +15,9 @@ from psycopg.types.json import Jsonb
 _DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
     id         text PRIMARY KEY,
-    kind       text NOT NULL,
     status     text NOT NULL,
     result     jsonb,
     error      text,
-    created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 )
 """
@@ -28,16 +26,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 @dataclass(frozen=True)
 class Job:
     id: str
-    kind: str
     status: str
     result: dict[str, Any] | None
     error: str | None
-    created_at: datetime
     updated_at: datetime
 
 
 class JobStore(Protocol):
-    def create(self, job_id: str, kind: str = "graph") -> bool:
+    def create(self, job_id: str) -> bool:
         """running 상태로 만든다. 이미 있으면 False."""
         ...
 
@@ -67,12 +63,12 @@ class InMemoryJobStore:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
 
-    def create(self, job_id: str, kind: str = "graph") -> bool:
+    def create(self, job_id: str) -> bool:
         with self._lock:
             if job_id in self._jobs:
                 return False
             now = datetime.now(UTC)
-            self._jobs[job_id] = Job(job_id, kind, "running", None, None, now, now)
+            self._jobs[job_id] = Job(job_id, "running", None, None, now)
             return True
 
     def get(self, job_id: str) -> Job | None:
@@ -91,13 +87,13 @@ class InMemoryJobStore:
     def fail_running(self) -> int:
         with self._lock:
             now = datetime.now(UTC)
-            running = [j for j in self._jobs.values() if j.kind == "graph" and j.status == "running"]
+            running = [j for j in self._jobs.values() if j.status == "running"]
             for job in running:
                 self._jobs[job.id] = replace(job, status="error", error="interrupted", updated_at=now)
             return len(running)
 
     def stale(self, statuses: set[str], before: datetime) -> list[str]:
-        return [j.id for j in list(self._jobs.values()) if j.kind == "graph" and j.status in statuses and j.updated_at < before]
+        return [j.id for j in list(self._jobs.values()) if j.status in statuses and j.updated_at < before]
 
     def delete(self, job_id: str) -> None:
         with self._lock:
@@ -112,17 +108,17 @@ class PostgresJobStore:
         with pool.connection() as conn:
             conn.execute(_DDL)
 
-    def create(self, job_id: str, kind: str = "graph") -> bool:
+    def create(self, job_id: str) -> bool:
         with self._pool.connection() as conn:
             cur = conn.execute(
-                "INSERT INTO jobs (id, kind, status) VALUES (%s, %s, 'running') ON CONFLICT (id) DO NOTHING", (job_id, kind)
+                "INSERT INTO jobs (id, status) VALUES (%s, 'running') ON CONFLICT (id) DO NOTHING", (job_id,)
             )
             return cur.rowcount == 1
 
     def get(self, job_id: str) -> Job | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT id, kind, status, result, error, created_at, updated_at FROM jobs WHERE id = %s", (job_id,)
+                "SELECT id, status, result, error, updated_at FROM jobs WHERE id = %s", (job_id,)
             ).fetchone()
         return Job(**row) if row else None
 
@@ -139,14 +135,14 @@ class PostgresJobStore:
     def fail_running(self) -> int:
         with self._pool.connection() as conn:
             cur = conn.execute(
-                "UPDATE jobs SET status = 'error', error = 'interrupted', updated_at = now() WHERE kind = 'graph' AND status = 'running'"
+                "UPDATE jobs SET status = 'error', error = 'interrupted', updated_at = now() WHERE status = 'running'"
             )
             return cur.rowcount
 
     def stale(self, statuses: set[str], before: datetime) -> list[str]:
         with self._pool.connection() as conn:
             rows = conn.execute(
-                "SELECT id FROM jobs WHERE kind = 'graph' AND status = ANY(%s) AND updated_at < %s", (list(statuses), before)
+                "SELECT id FROM jobs WHERE status = ANY(%s) AND updated_at < %s", (list(statuses), before)
             ).fetchall()
         return [r["id"] for r in rows]
 

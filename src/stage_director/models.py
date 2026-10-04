@@ -148,7 +148,6 @@ class FeedbackResume(CamelModel):
 class ApproveResume(CamelModel):
     interrupt_id: str
     kind: Literal["approve"]
-    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 ResumeRequest = Annotated[SectionsResume | FeedbackResume | ApproveResume, Field(discriminator="kind")]

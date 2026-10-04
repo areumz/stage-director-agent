@@ -19,7 +19,6 @@ from stage_director.graph_nodes import MAX_CONCURRENT_PROPOSALS
 from stage_director.jobs import JobStore
 from stage_director.llm.client import LLMError
 from stage_director.models import (
-    ApproveResume,
     FeedbackResume,
     ResumeRequest,
     RunStatus,
@@ -32,25 +31,17 @@ log = logging.getLogger(__name__)
 MAX_CONCURRENT_RUNS = 2  # 그래프 동시 실행 수(스레드 풀 크기). 구간 단위 동시 호출(MAX_CONCURRENT_PROPOSALS)과 곱해져 LLM RPM 에 영향
 
 
-class RunNotFound(Exception):
-    """jobs 에 없는 thread_id. 존재한 적이 없거나 보존 정책으로 삭제됐다(구별 못 함)."""
+class RunError(Exception):
+    """요청을 거절한다. api 가 status·code 를 그대로 HTTP 응답으로 바꾼다.
 
+    404 thread_not_found: jobs 에 없는 thread_id(존재한 적이 없거나 보존 정책으로 삭제됨, 구별 못 함).
+    409 not_waiting_input / stale_interrupt / kind_mismatch: 상태와 맞지 않는 요청.
+    422 invalid_sections / invalid_targets: resume 페이로드가 잘못됨. interrupt 는 그대로 남는다.
+    """
 
-class RunConflict(Exception):
-    """상태와 맞지 않는 요청(HTTP 409). code: not_waiting_input / stale_interrupt / kind_mismatch."""
-
-    def __init__(self, code: str):
+    def __init__(self, status: int, code: str, message: str = ""):
         super().__init__(code)
-        self.code = code
-
-
-class InvalidResume(Exception):
-    """resume 페이로드가 잘못됐다(HTTP 422). interrupt 는 그대로 남는다. code: invalid_sections / invalid_targets."""
-
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+        self.status, self.code, self.message = status, code, message
 
 
 class Runner:
@@ -74,7 +65,7 @@ class Runner:
     def status(self, thread_id: str) -> RunStatus:
         job = self._jobs.get(thread_id)
         if job is None:
-            raise RunNotFound(thread_id)
+            raise RunError(404, "thread_not_found")
         interrupt = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
         return RunStatus(thread_id=thread_id, status=job.status, interrupt=interrupt, result=job.result, error=job.error)
 
@@ -84,16 +75,16 @@ class Runner:
         with self._resume_lock:
             job = self._jobs.get(thread_id)
             if job is None:
-                raise RunNotFound(thread_id)
+                raise RunError(404, "thread_not_found")
             pending = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
             if pending is None:
-                raise RunConflict("not_waiting_input")
+                raise RunError(409, "not_waiting_input")
             if req.interrupt_id != pending["interruptId"]:
-                raise RunConflict("stale_interrupt")
+                raise RunError(409, "stale_interrupt")
             value = self._resume_value(thread_id, pending, req)
             # 검증을 다 통과한 뒤에야 전이한다 — 잘못된 요청이 interrupt 를 소모하지 않는다. 이 전이가 더블 클릭 방어다.
             if not self._jobs.transition(thread_id, from_={"waiting_input"}, to="running"):
-                raise RunConflict("not_waiting_input")
+                raise RunError(409, "not_waiting_input")
         self._submit(thread_id, Command(resume=value))
         return self.status(thread_id)
 
@@ -113,20 +104,14 @@ class Runner:
                 self._jobs.transition(thread_id, from_={"running"}, to="waiting_input")
             else:
                 self._jobs.transition(thread_id, from_={"running"}, to="done", result=self._result(thread_id))
-        except LLMError:
-            log.warning("run %s: llm failed", thread_id, exc_info=True)
-            self._jobs.transition(thread_id, from_={"running"}, to="error", error="llm_failed")
-            return
-        except Exception:
+        except Exception as e:
             log.exception("run %s failed", thread_id)
-            self._jobs.transition(thread_id, from_={"running"}, to="error", error="internal_error")
-            return
+            error = "llm_failed" if isinstance(e, LLMError) else "internal_error"
+            self._jobs.transition(thread_id, from_={"running"}, to="error", error=error)
 
     def _pending_interrupt(self, thread_id: str) -> dict[str, Any] | None:
-        for task in self._graph.get_state(self._config(thread_id)).tasks:
-            for interrupt in task.interrupts:
-                return interrupt.value
-        return None
+        tasks = self._graph.get_state(self._config(thread_id)).tasks
+        return next((i.value for t in tasks for i in t.interrupts), None)
 
     def _result(self, thread_id: str) -> dict[str, Any]:
         values = self._graph.get_state(self._config(thread_id)).values
@@ -140,18 +125,17 @@ class Runner:
         state = self._graph.get_state(self._config(thread_id)).values
         if isinstance(req, SectionsResume):
             if pending["kind"] != "confirm_sections":
-                raise RunConflict("kind_mismatch")
+                raise RunError(409, "kind_mismatch")
             reason = validate_section_edit(req.payload.sections, state["request"].duration_sec)
             if reason:
-                raise InvalidResume("invalid_sections", reason)
+                raise RunError(422, "invalid_sections", reason)
             return {"sections": [s.model_dump(by_alias=True) for s in req.payload.sections]}
         if pending["kind"] != "review":
-            raise RunConflict("kind_mismatch")
+            raise RunError(409, "kind_mismatch")
         if isinstance(req, FeedbackResume):
             count = len(state["sections"])
             bad = [t for t in req.payload.targets if t >= count]
             if bad:
-                raise InvalidResume("invalid_targets", f"구간 번호 {bad} 는 0~{count - 1} 범위 밖이다")
+                raise RunError(422, "invalid_targets", f"구간 번호 {bad} 는 0~{count - 1} 범위 밖이다")
             return {"action": "feedback", "text": req.payload.text, "targets": sorted(set(req.payload.targets))}
-        assert isinstance(req, ApproveResume)
         return {"action": "approve"}

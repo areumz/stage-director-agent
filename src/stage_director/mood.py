@@ -44,7 +44,5 @@ def interpret_moods(llm: LLMClient, audio: bytes, mime_type: str, sections: list
     except LLMError:
         return [""] * len(sections)
     moods = raw.get("moods") if isinstance(raw, dict) else None
-    if not isinstance(moods, list):
-        moods = []
-    cleaned = [m.strip()[:MOOD_OUTPUT_MAX] if isinstance(m, str) else "" for m in moods[: len(sections)]]
-    return cleaned + [""] * (len(sections) - len(cleaned))
+    moods = moods if isinstance(moods, list) else []
+    return [moods[i].strip()[:MOOD_OUTPUT_MAX] if i < len(moods) and isinstance(moods[i], str) else "" for i in range(len(sections))]

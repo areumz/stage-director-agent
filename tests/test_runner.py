@@ -14,7 +14,7 @@ from stage_director.models import (
     SectionsResume,
     SequenceRequest,
 )
-from stage_director.runner import InvalidResume, RunConflict, Runner, RunNotFound
+from stage_director.runner import RunError, Runner
 from tests.conftest import SEQUENCE_REQUEST, DeferredExecutor, InlineExecutor
 
 CONTEXT = SequenceRequest.model_validate(SEQUENCE_REQUEST)  # 60초: 0~30 잔잔, 30~60 큰 소리 → 구간 2개
@@ -68,9 +68,9 @@ def test_start_is_idempotent_for_an_existing_thread():
 
 def test_unknown_thread_is_not_found():
     runner, _, _ = make()
-    with pytest.raises(RunNotFound):
+    with pytest.raises(RunError, match="thread_not_found"):
         runner.status("nope")
-    with pytest.raises(RunNotFound):
+    with pytest.raises(RunError, match="thread_not_found"):
         runner.resume("nope", ApproveResume(interrupt_id="x", kind="approve"))
 
 
@@ -106,7 +106,7 @@ def test_feedback_turn_returns_to_review_with_a_new_interrupt_id():
 def test_stale_interrupt_id_is_rejected_and_the_interrupt_stays():
     runner, _, _ = make()
     status = runner.start("t1", CONTEXT)
-    with pytest.raises(RunConflict) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", sections_resume(status, interrupt_id="t1:9:confirm_sections"))
     assert e.value.code == "stale_interrupt"
     assert runner.status("t1").interrupt["interruptId"] == status.interrupt["interruptId"]
@@ -116,7 +116,7 @@ def test_resume_after_done_is_not_waiting_input():
     runner, _, _ = make(GOOD, GOOD)
     status = runner.resume("t1", sections_resume(runner.start("t1", CONTEXT)))
     done = runner.resume("t1", approve(status))
-    with pytest.raises(RunConflict) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", ApproveResume(interrupt_id="whatever", kind="approve"))
     assert done.status == "done" and e.value.code == "not_waiting_input"
 
@@ -128,7 +128,7 @@ def test_double_click_runs_the_graph_exactly_once():
     executor.run_all()  # → confirm_sections 에서 대기
     request = sections_resume(runner.status("t1"))
     runner.resume("t1", request)  # 첫 번째: 접수(running)
-    with pytest.raises(RunConflict) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", request)  # 두 번째: 이미 running
     assert e.value.code == "not_waiting_input"
     executor.run_all()
@@ -140,7 +140,7 @@ def test_invalid_sections_are_rejected_and_the_interrupt_stays():
     runner, _, _ = make()
     status = runner.start("t1", CONTEXT)
     gap = [Section(label="a", start_sec=0, end_sec=20), Section(label="b", start_sec=25, end_sec=60)]
-    with pytest.raises(InvalidResume) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", sections_resume(status, sections=gap))
     assert e.value.code == "invalid_sections"
     after = runner.status("t1")
@@ -151,7 +151,7 @@ def test_feedback_targets_out_of_range_are_rejected():
     runner, _, _ = make(GOOD, GOOD)
     review = runner.resume("t1", sections_resume(runner.start("t1", CONTEXT)))
     bad = FeedbackResume(interrupt_id=review.interrupt["interruptId"], kind="feedback", payload=FeedbackPayload(text="x", targets=[5]))
-    with pytest.raises(InvalidResume) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", bad)
     assert e.value.code == "invalid_targets"
     assert runner.status("t1").status == "waiting_input"
@@ -160,7 +160,7 @@ def test_feedback_targets_out_of_range_are_rejected():
 def test_kind_must_match_the_pending_interrupt():
     runner, _, _ = make()
     status = runner.start("t1", CONTEXT)
-    with pytest.raises(RunConflict) as e:
+    with pytest.raises(RunError) as e:
         runner.resume("t1", ApproveResume(interrupt_id=status.interrupt["interruptId"], kind="approve"))
     assert e.value.code == "kind_mismatch"
 
