@@ -141,7 +141,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | 테이블 | 소유 | 내용 |
 | --- | --- | --- |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | LangGraph | `setup()`이 생성. 스키마를 직접 설계하지 않는다 |
-| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id` 또는 `jobId`), `kind`(`analysis`/`graph`), `status`(`running/waiting_input/done/error`), `progress real null`, `result jsonb null`, `error text null`, `created_at`, `updated_at` |
+| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id` 또는 `jobId`), `kind`(`analysis`/`graph`), `status`(`running/waiting_input/done/error`), `result jsonb null`, `error text null`, `created_at`, `updated_at` |
 
 `jobs`가 필요한 이유: 백그라운드 실행 중 Python 프로세스가 죽으면 체크포인트만으로는 "실행 중이었는지"를 알 수 없다. 서비스 시작 시 `status=running`인 행을 `error(interrupted)`로 바꾸고, 사용자가 "다시 시도"하면 같은 `thread_id`로 마지막 체크포인트에서 재개한다.
 
