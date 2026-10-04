@@ -7,7 +7,14 @@ Next.js 가 응답을 그대로 넘겨도 되도록 모르는 필드는 무시
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 from contracts.stage_state import HEX_COLOR
