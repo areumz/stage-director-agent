@@ -14,3 +14,7 @@ class LLMClient(Protocol):
         schema 는 모델을 유도하는 용도. 돌려받은 값이 schema 를 지킨다고 믿지 말고 호출자가 방어한다.
         """
         ...
+
+    def generate_json_with_audio(self, *, system: str, user: str, schema: dict[str, Any], audio: bytes, mime_type: str) -> Any:
+        """generate_json 과 같지만 오디오 하나를 함께 입력한다. 실패하면 LLMError."""
+        ...

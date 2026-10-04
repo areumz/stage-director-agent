@@ -82,3 +82,29 @@ def test_gemini_wraps_sdk_failures():
     client, _ = gemini_with(RuntimeError("network down"))
     with pytest.raises(LLMError, match="network down"):
         call(client)
+
+
+# ── 오디오 입력 ───────────────────────────────────────────────
+
+
+def test_fake_audio_call_records_size_and_shares_the_queue():
+    llm = FakeLLM({"n": 1}, {"n": 2})
+    assert llm.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"abcd", mime_type="audio/mpeg") == {"n": 1}
+    assert call(llm) == {"n": 2}
+    assert llm.calls[0]["audio_bytes"] == 4 and llm.calls[0]["mime_type"] == "audio/mpeg"
+
+
+def test_gemini_audio_sends_the_audio_part_before_the_prompt():
+    client, models = gemini_with(SimpleNamespace(text='{"a": 1}'))
+    result = client.generate_json_with_audio(system="sys", user="usr", schema=SCHEMA, audio=b"abc", mime_type="audio/mpeg")
+    assert result == {"a": 1}
+    part, prompt = models.kwargs["contents"]
+    assert part.inline_data.data == b"abc" and part.inline_data.mime_type == "audio/mpeg"
+    assert prompt == "usr"
+    assert models.kwargs["config"].response_json_schema == SCHEMA
+
+
+def test_gemini_audio_wraps_sdk_failures():
+    client, _ = gemini_with(RuntimeError("network down"))
+    with pytest.raises(LLMError, match="network down"):
+        client.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"a", mime_type="audio/mpeg")

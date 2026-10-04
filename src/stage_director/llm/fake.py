@@ -11,6 +11,13 @@ class FakeLLM:
 
     def generate_json(self, *, system: str, user: str, schema: dict[str, Any]) -> Any:
         self.calls.append({"system": system, "user": user, "schema": schema})
+        return self._next()
+
+    def generate_json_with_audio(self, *, system: str, user: str, schema: dict[str, Any], audio: bytes, mime_type: str) -> Any:
+        self.calls.append({"system": system, "user": user, "schema": schema, "audio_bytes": len(audio), "mime_type": mime_type})
+        return self._next()
+
+    def _next(self) -> Any:
         assert self._responses, "FakeLLM 에 넣어 둔 응답이 다 떨어졌다"
         response = self._responses.pop(0)
         if isinstance(response, Exception):
