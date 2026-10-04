@@ -26,6 +26,7 @@ from stage_director.models import (
     SectionProposal,
 )
 from stage_director.propose import propose_section
+from stage_director.retention import purge
 from stage_director.runner import (
     MAX_CONCURRENT_RUNS,
     InvalidResume,
@@ -59,6 +60,7 @@ def create_app(
         # 체크포인터가 뜨지 않으면 서비스 전체가 기동에 실패
         with checkpointer_cm() as saver:
             store = job_store or PostgresJobStore(saver.conn)
+            purge(store, saver)  # 먼저: fail_running 이 updated_at 을 갱신하기 전에 방치된 작업을 정리
             store.fail_running()  # 죽기 전에 running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
             pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
             app.state.runner = Runner(build_sequence_graph(llm, checkpointer=saver), store, pool)
