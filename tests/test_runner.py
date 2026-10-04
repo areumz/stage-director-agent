@@ -194,3 +194,21 @@ def test_a_run_killed_before_it_started_is_marked_interrupted_and_can_be_restart
     runner.start("t1", CONTEXT)  # 다시 시도: 체크포인트가 없으므로 처음부터
     executor.run_all()
     assert runner.status("t1").status == "waiting_input"
+
+
+def test_post_run_failure_marks_error_and_retry_finishes_the_run():
+    class FlakyDone(InMemoryJobStore):
+        failed = False
+
+        def transition(self, job_id, *, from_, to, **kw):
+            if to == "done" and not self.failed:
+                self.failed = True
+                raise RuntimeError("db blip")
+            return super().transition(job_id, from_=from_, to=to, **kw)
+
+    jobs = FlakyDone()
+    runner = Runner(build_sequence_graph(FakeLLM(GOOD), InMemorySaver()), jobs, InlineExecutor())
+    review = runner.resume("t1", sections_resume(runner.start("t1", SHORT)))
+    status = runner.resume("t1", approve(review))
+    assert status.status == "error" and status.error == "internal_error"
+    assert runner.start("t1", SHORT).status == "done"  # 체크포인트는 이미 끝난 상태: invoke(None) 이 최종값을 돌려준다

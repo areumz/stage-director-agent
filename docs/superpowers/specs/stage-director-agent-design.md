@@ -167,7 +167,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 - 구간 경계는 interrupt #1에서만 바뀐다. 이후 피드백은 기존 구간의 `state`·`rationale`만 재생성하므로 `idx`가 안정적이다.
 - `interruptId = f"{thread_id}:{revision}:{kind}"`. 낡은 화면에서 온 resume은 거부된다.
-- 부분 재생성 불변식: 피드백 라우팅이 지정한 `targets` 밖의 `proposals[idx]`는 바이트 단위로 같아야 한다(테스트 대상).
+- 부분 재생성 불변식: 사용자가 지정한 `targets` 밖의 `proposals[idx]`는 바이트 단위로 같아야 한다(테스트 대상).
 - Interrupt 페이로드: #1 `{interruptId, kind:"confirm_sections", sections:[{label,startSec,endSec,mood}], energyCurve, durationSec}`, #2 `{interruptId, kind:"review", items, issues}`. Resume 페이로드(`POST …/resume` 본문 `{interruptId, kind, payload}`): #1 `kind:"sections"`, `payload:{sections}`(연속 덮음·최소 길이·개수·라벨 검증 후 수용, 위반 시 422), #2 `kind:"approve"`(payload 없음) 또는 `kind:"feedback"`, `payload:{text, targets:[idx]}`. **`targets` 는 사용자가 지정한다**(LLM 라우터 없음). 피드백 턴의 자동 재생성도 `targets` 안으로 제한되고, 피드백 턴마다 자동 재생성 예산(2회)이 다시 주어진다.
 
 ### 6.4 보존 정책

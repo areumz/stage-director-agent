@@ -67,6 +67,7 @@ def create_app(
             try:
                 yield
             finally:
+                # shutdown 은 이미 도는 그래프 스레드를 멈추지 못한다(인터프리터 종료 때 join). 그 작업은 running 으로 남고 다음 기동의 fail_running 이 복구
                 if executor is None:
                     pool.shutdown(wait=False, cancel_futures=True)
 

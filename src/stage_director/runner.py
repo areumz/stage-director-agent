@@ -8,6 +8,7 @@ ponytail: 프로세스 하나를 가정한다. 인스턴스가 여러 개면 한
 """
 
 import logging
+import threading
 from concurrent.futures import Executor
 from typing import Any
 
@@ -57,6 +58,7 @@ class Runner:
         self._graph = graph
         self._jobs = jobs
         self._executor = executor
+        self._resume_lock = threading.Lock()
 
     # ── 공개 API ──────────────────────────────────────────────
 
@@ -77,18 +79,21 @@ class Runner:
         return RunStatus(thread_id=thread_id, status=job.status, interrupt=interrupt, result=job.result, error=job.error)
 
     def resume(self, thread_id: str, req: ResumeRequest) -> RunStatus:
-        job = self._jobs.get(thread_id)
-        if job is None:
-            raise RunNotFound(thread_id)
-        pending = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
-        if pending is None:
-            raise RunConflict("not_waiting_input")
-        if req.interrupt_id != pending["interruptId"]:
-            raise RunConflict("stale_interrupt")
-        value = self._resume_value(thread_id, pending, req)
-        # 검증을 다 통과한 뒤에야 전이한다 — 잘못된 요청이 interrupt 를 소모하지 않는다. 이 전이가 더블 클릭 방어다.
-        if not self._jobs.transition(thread_id, from_={"waiting_input"}, to="running"):
-            raise RunConflict("not_waiting_input")
+        # ponytail: 프로세스 하나 가정. 낡은 resume 이 interrupt X 를 읽고 전이하는 사이 다른 실행이 Y 에 도달하는 경쟁을 락으로 막는다.
+        # 인스턴스가 여러 개면 interrupt id 를 jobs 에 저장하고 조건부 전이에서 비교한다.
+        with self._resume_lock:
+            job = self._jobs.get(thread_id)
+            if job is None:
+                raise RunNotFound(thread_id)
+            pending = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
+            if pending is None:
+                raise RunConflict("not_waiting_input")
+            if req.interrupt_id != pending["interruptId"]:
+                raise RunConflict("stale_interrupt")
+            value = self._resume_value(thread_id, pending, req)
+            # 검증을 다 통과한 뒤에야 전이한다 — 잘못된 요청이 interrupt 를 소모하지 않는다. 이 전이가 더블 클릭 방어다.
+            if not self._jobs.transition(thread_id, from_={"waiting_input"}, to="running"):
+                raise RunConflict("not_waiting_input")
         self._submit(thread_id, Command(resume=value))
         return self.status(thread_id)
 
@@ -101,9 +106,13 @@ class Runner:
         self._executor.submit(self._run, thread_id, graph_input)
 
     def _run(self, thread_id: str, graph_input: Any) -> None:
-        # ponytail: 아래 jobs 갱신이 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구된다.
+        # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구된다.
         try:
             result = self._graph.invoke(graph_input, self._config(thread_id))
+            if "__interrupt__" in result:
+                self._jobs.transition(thread_id, from_={"running"}, to="waiting_input")
+            else:
+                self._jobs.transition(thread_id, from_={"running"}, to="done", result=self._result(thread_id))
         except LLMError:
             log.warning("run %s: llm failed", thread_id, exc_info=True)
             self._jobs.transition(thread_id, from_={"running"}, to="error", error="llm_failed")
@@ -112,10 +121,6 @@ class Runner:
             log.exception("run %s failed", thread_id)
             self._jobs.transition(thread_id, from_={"running"}, to="error", error="internal_error")
             return
-        if "__interrupt__" in result:
-            self._jobs.transition(thread_id, from_={"running"}, to="waiting_input")
-        else:
-            self._jobs.transition(thread_id, from_={"running"}, to="done", result=self._result(thread_id))
 
     def _pending_interrupt(self, thread_id: str) -> dict[str, Any] | None:
         for task in self._graph.get_state(self._config(thread_id)).tasks:
