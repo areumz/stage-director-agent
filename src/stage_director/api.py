@@ -4,8 +4,8 @@
 """
 
 import secrets
-import uuid
 from collections.abc import Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import AbstractContextManager, asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -15,16 +15,24 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from stage_director.checkpointer import postgres_checkpointer
 from stage_director.graph import build_sequence_graph
-from stage_director.graph_nodes import MAX_CONCURRENT_PROPOSALS
+from stage_director.jobs import JobStore, PostgresJobStore
 from stage_director.llm.client import LLMClient, LLMError
 from stage_director.llm.gemini import GeminiClient
 from stage_director.models import (
     ProposeRequest,
+    ResumeRequest,
+    RunCreate,
+    RunStatus,
     SectionProposal,
-    SequenceRequest,
-    SequenceResponse,
 )
 from stage_director.propose import propose_section
+from stage_director.runner import (
+    MAX_CONCURRENT_RUNS,
+    InvalidResume,
+    RunConflict,
+    Runner,
+    RunNotFound,
+)
 from stage_director.settings import Settings
 
 
@@ -32,8 +40,10 @@ def create_app(
     settings: Settings | None = None,
     llm: LLMClient | None = None,
     checkpointer_cm: Callable[[], AbstractContextManager[BaseCheckpointSaver]] | None = None,
+    job_store: JobStore | None = None,
+    executor: Executor | None = None,
 ) -> FastAPI:
-    """settings·llm·checkpointer_cm 은 테스트에서 주입. 운영에서는 환경변수 + Gemini + Postgres(Neon)"""
+    """settings·llm·checkpointer_cm·job_store·executor 는 테스트에서 주입. 운영에서는 환경변수 + Gemini + Postgres(Neon) + 스레드 풀"""
     settings = settings or Settings.from_env()
     if not settings.internal_api_key.strip():
         raise ValueError("INTERNAL_API_KEY 가 비어 있다")
@@ -48,8 +58,15 @@ def create_app(
     async def lifespan(app: FastAPI):
         # 체크포인터가 뜨지 않으면 서비스 전체가 기동에 실패
         with checkpointer_cm() as saver:
-            app.state.sequence_graph = build_sequence_graph(llm, checkpointer=saver)
-            yield
+            store = job_store or PostgresJobStore(saver.conn)
+            store.fail_running()  # 죽기 전에 running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
+            pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
+            app.state.runner = Runner(build_sequence_graph(llm, checkpointer=saver), store, pool)
+            try:
+                yield
+            finally:
+                if executor is None:
+                    pool.shutdown(wait=False, cancel_futures=True)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -59,26 +76,36 @@ def create_app(
         errors = [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
         return JSONResponse(status_code=422, content={"detail": errors})
 
+    @app.exception_handler(RunNotFound)
+    async def _run_not_found(request, exc):
+        return JSONResponse(status_code=404, content={"detail": "thread_not_found"})
+
+    @app.exception_handler(RunConflict)
+    async def _run_conflict(request, exc):
+        return JSONResponse(status_code=409, content={"detail": exc.code})
+
+    @app.exception_handler(InvalidResume)
+    async def _invalid_resume(request, exc):
+        return JSONResponse(status_code=422, content={"detail": exc.code, "message": exc.message})
+
     @app.post("/propose", dependencies=[Depends(require_internal_key)])
     def propose(req: ProposeRequest) -> SectionProposal:
-        # ponytail: 동기 요청. 최악은 MAX_RETRIES+1 = 3회 x TIMEOUT_MS 60초 = 약 3분. 4단계에서 작업+폴링으로
+        # ponytail: 동기 요청. 최악은 MAX_RETRIES+1 = 3회 x TIMEOUT_MS 60초 = 약 3분. 필요하면 /runs 처럼 작업+폴링으로
         try:
             return propose_section(llm, req)
         except LLMError:
             raise HTTPException(status_code=502, detail="llm_failed")
 
-    @app.post("/sequence", dependencies=[Depends(require_internal_key)])
-    def sequence(req: SequenceRequest) -> SequenceResponse:
-        # ponytail: 동기 요청이고 threadId 를 매번 새로 만든다. /runs 의 멱등 프로토콜(스펙 §4.2)은 4단계 몫.
-        # 구간 수만큼 propose_section 이 걸리므로 /propose 보다 훨씬 오래 걸릴 수 있다 — 4단계에서 작업+폴링.
-        thread_id = str(uuid.uuid4())
-        config = {"configurable": {"thread_id": thread_id}, "max_concurrency": MAX_CONCURRENT_PROPOSALS}
-        try:
-            result = app.state.sequence_graph.invoke({"request": req}, config=config)
-        except LLMError:
-            raise HTTPException(status_code=502, detail="llm_failed")
-        return SequenceResponse(
-            thread_id=thread_id, sections=result["sections"], items=result["final_items"], issues=result["final_issues"]
-        )
+    @app.post("/runs", status_code=202, dependencies=[Depends(require_internal_key)])
+    def create_run(body: RunCreate) -> RunStatus:
+        return app.state.runner.start(body.thread_id, body.context)
+
+    @app.get("/runs/{thread_id}", dependencies=[Depends(require_internal_key)])
+    def get_run(thread_id: str) -> RunStatus:
+        return app.state.runner.status(thread_id)
+
+    @app.post("/runs/{thread_id}/resume", status_code=202, dependencies=[Depends(require_internal_key)])
+    def resume_run(thread_id: str, body: ResumeRequest) -> RunStatus:
+        return app.state.runner.resume(thread_id, body)
 
     return app

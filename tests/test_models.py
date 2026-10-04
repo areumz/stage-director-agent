@@ -9,7 +9,6 @@ from stage_director.models import (
     RunStatus,
     Section,
     SequenceRequest,
-    SequenceResponse,
 )
 
 BODY = {
@@ -115,24 +114,6 @@ def test_issue_idx_defaults_to_none_and_serializes():
     issue = Issue(rule="clamped", message="m", idx=2)
     assert issue.idx == 2
     assert issue.model_dump(mode="json", by_alias=True)["idx"] == 2
-
-
-def test_sequence_response_serializes_camel_case():
-    from contracts.stage_state import default_stage_state
-    from stage_director.models import Section
-    from stage_director.sequence import SequenceItem
-
-    item = SequenceItem(
-        section_label="intro", start_sec=0, end_sec=30, transition_ms=2000,
-        state=default_stage_state("#9F77DD"), rationale="r",
-    )
-    response = SequenceResponse(
-        thread_id="t1", sections=[Section(label="intro", start_sec=0, end_sec=30)], items=[item], issues=[]
-    )
-    dumped = response.model_dump(mode="json", by_alias=True)
-    assert dumped["threadId"] == "t1"
-    assert dumped["sections"][0]["startSec"] == 0
-    assert dumped["items"][0]["sectionLabel"] == "intro"
 
 
 # ── 4단계: 무드, 음원 URL, /runs ─────────────────────────────

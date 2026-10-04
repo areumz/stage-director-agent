@@ -107,13 +107,6 @@ class SectionProposal(CamelModel):
     issues: list[Issue]
 
 
-class SequenceResponse(CamelModel):
-    thread_id: str
-    sections: list[Section]
-    items: list[SequenceItem]
-    issues: list[Issue]
-
-
 class RunCreate(CamelModel):
     """POST /runs 본문. thread_id 는 Next.js 가 만든 stage_sequences.id (스펙 §6.2)."""
 
