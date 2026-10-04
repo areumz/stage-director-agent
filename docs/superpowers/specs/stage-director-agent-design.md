@@ -141,11 +141,11 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | 테이블 | 소유 | 내용 |
 | --- | --- | --- |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | LangGraph | `setup()`이 생성. 스키마를 직접 설계하지 않는다 |
-| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id` 또는 `jobId`), `kind`(`analysis`/`graph`), `status`(`running/waiting_input/done/error`), `result jsonb null`, `error text null`, `created_at`, `updated_at` |
+| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id`), `status`(`running/waiting_input/done/error`), `result jsonb null`, `error text null`, `updated_at`. 4단계에는 그래프 작업만 있어 `kind`·`created_at`·`progress` 컬럼을 두지 않는다 — 분석 작업(`jobId`)을 넣는 5단계에서 `kind`(`analysis`/`graph`)와 `progress` 등을 추가한다 |
 
 `jobs`가 필요한 이유: 백그라운드 실행 중 Python 프로세스가 죽으면 체크포인트만으로는 "실행 중이었는지"를 알 수 없다. 서비스 시작 시 `status=running`인 행을 `error(interrupted)`로 바꾸고, 사용자가 "다시 시도"하면 같은 `thread_id`로 마지막 체크포인트에서 재개한다.
 
-상태 판정(그래프 작업): `jobs.status` 는 Runner 가 전이 시점(시작 `running`, interrupt 도달 `waiting_input`, 종료 `done`, 예외 `error`)에 조건부 UPDATE 로 직접 기록한다. 대기 중인 interrupt 페이로드는 체크포인트의 `tasks[].interrupts` 에서 읽는다. `jobs` 에는 `progress` 컬럼이 없다(분석 작업이 필요해지면 추가).
+상태 판정(그래프 작업): `jobs.status` 는 Runner 가 전이 시점(시작 `running`, interrupt 도달 `waiting_input`, 종료 `done`, 예외 `error`)에 조건부 UPDATE 로 직접 기록한다. 대기 중인 interrupt 페이로드는 체크포인트의 `tasks[].interrupts` 에서 읽는다. `jobs` 에는 `progress`·`kind`·`created_at` 컬럼이 없다(분석 작업이 필요해지면 추가).
 
 ### 6.2 `thread_id`
 
@@ -176,7 +176,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 **규칙 1. 승인된 스레드: 승인 24시간 후 체크포인트만 삭제**
 
-- 대상: 승인이 끝난 그래프 작업(`jobs.kind=graph`, `jobs.status=done`).
+- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 4단계에서는 `jobs` 의 모든 행이 그래프 작업이다).
 - 기준 시각: `jobs.status`가 `done`이 된 시각(= 사용자가 승인해 최종 시퀀스가 나온 시점). Python은 Supabase의 `approved_at`을 볼 수 없으므로 이 시각을 쓴다.
 - 삭제 범위: LangGraph 체크포인트(실행 기록)만 `adelete_thread`로 지운다. 승인본은 이미 `stage_sequences.items`에 있고 이후 조회는 그 행을 읽으므로 체크포인트는 필요 없다.
 - 24시간을 두는 이유: 승인 직후 Next.js가 최종 시퀀스를 저장하다 실패해도 같은 스레드에서 결과를 다시 받아 저장할 수 있게 하는 여유 시간이다.
@@ -187,7 +187,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 - 기준 시각: `jobs.updated_at`(마지막 활동). 재개나 피드백이 있으면 갱신되므로 7일간 아무 활동이 없을 때만 해당한다.
 - 삭제 범위: Python 쪽은 체크포인트와 `jobs` 행을 모두 지운다. Supabase의 `draft` 행은 Python이 지우지 못하므로(Supabase에 쓰지 않는다), 다음 조회 때 Next.js가 지운다. 스레드가 삭제된 초안을 조회하면 Python이 스레드를 모른다고 답하고, Next.js가 410을 돌려주며 초안 행을 삭제한다. UI는 "세션이 만료되었습니다. 다시 시작하세요"를 표시한다.
 
-**참고: 분석 작업 결과.** 분석 작업(`jobs.kind=analysis`)의 `jobs.result`는 완료 후 7일 보관한다. 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 것이며(§4.1), 위 두 규칙과 별개다.
+**참고: 분석 작업 결과.** 분석 작업(5단계에서 `kind=analysis` 로 추가)의 `jobs.result`는 완료 후 7일 보관한다. 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 것이며(§4.1), 위 두 규칙과 별개다.
 
 ## 7. 검증
 
