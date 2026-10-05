@@ -1,6 +1,6 @@
-"""오디오 입력 무드 해석 (스펙 §13). 곡 전체 오디오와 구간 시각 목록을 한 번에 보내 구간별 분위기를 받는다.
+"""오디오 입력 무드 해석. 곡 전체 오디오와 구간 시각 목록을 한 번에 보내 구간별 분위기를 받음.
 
-실패는 치명적이지 않다 — 무드가 비어 있어도 연출 제안은 돌고, interrupt #1 화면에서 사람이 채울 수 있다.
+— 무드가 비어 있어도 연출 제안은 돌고, interrupt #1 화면에서 사람이 채울 수 있음.
 """
 
 from stage_director.llm.client import LLMClient, LLMError
@@ -36,7 +36,7 @@ def _user_prompt(sections: list[Section], track: Track) -> str:
 
 
 def interpret_moods(llm: LLMClient, audio: bytes, mime_type: str, sections: list[Section], track: Track) -> list[str]:
-    """항상 len(sections) 개의 문자열을 돌려준다. 어떤 실패에도 예외를 던지지 않는다(빈 문자열로 채움)."""
+    """항상 len(sections) 개의 문자열을 돌려줌. 어떤 실패에도 예외를 던지지 않음(빈 문자열로 채움)."""
     try:
         raw = llm.generate_json_with_audio(
             system=SYSTEM_PROMPT, user=_user_prompt(sections, track), schema=MOOD_SCHEMA, audio=audio, mime_type=mime_type

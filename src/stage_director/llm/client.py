@@ -11,10 +11,10 @@ class LLMClient(Protocol):
     def generate_json(self, *, system: str, user: str, schema: dict[str, Any]) -> Any:
         """schema(JSON Schema)에 맞는 JSON 하나를 생성해 파싱한 값을 돌려줌. 실패하면 LLMError.
 
-        schema 는 모델을 유도하는 용도. 돌려받은 값이 schema 를 지킨다고 믿지 말고 호출자가 방어한다.
+        schema 는 모델을 유도하는 용도. 돌려받은 값이 schema 를 지킨다고 믿지 말고 호출자가 방어.
         """
         ...
 
     def generate_json_with_audio(self, *, system: str, user: str, schema: dict[str, Any], audio: bytes, mime_type: str) -> Any:
-        """generate_json 과 같지만 오디오 하나를 함께 입력한다. 실패하면 LLMError."""
+        """generate_json 과 같지만 오디오 하나를 함께 입력. 실패하면 LLMError."""
         ...

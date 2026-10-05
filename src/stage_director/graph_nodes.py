@@ -33,12 +33,12 @@ def detect_node(state: GraphState) -> dict:
 
 
 def interrupt_id(config: RunnableConfig, revision: int, kind: str) -> str:
-    """스펙 §6.3: 낡은 화면에서 온 resume 을 거부하기 위한 id."""
+    """낡은 화면에서 온 resume 을 거부하기 위한 id."""
     return f"{config['configurable']['thread_id']}:{revision}:{kind}"
 
 
 def make_mood_node(llm: LLMClient, fetch: Callable[[str], tuple[bytes, str]] = fetch_audio):
-    """곡 전체 오디오로 구간 무드를 한 번에 해석한다. audioUrl 이 없거나 내려받기에 실패하면 무드 없이 진행(비치명적)."""
+    """곡 전체 오디오로 구간 무드를 한 번에 해석. audioUrl 이 없거나 내려받기에 실패하면 무드 없이 진행(비치명적)"""
 
     def mood_node(state: GraphState) -> dict:
         req = state["request"]
@@ -87,7 +87,7 @@ def fan_out_initial(state: GraphState) -> list[Send]:
 
 
 def make_propose_node(llm: LLMClient):
-    """llm 을 클로저로 주입한 propose 노드를 만든다. FastAPI create_app(llm=...)과 같은 패턴."""
+    """llm 을 클로저로 주입한 propose 노드 생성. cf) FastAPI create_app(llm=...)"""
 
     def propose_node(task: ProposeTask) -> dict:
         req = task["request"]

@@ -1,9 +1,9 @@
-"""체크포인트 보존 정책 (스펙 §6.4). 서비스 시작 시와 주기 스크립트(`python -m stage_director.retention`)에서 실행.
+"""체크포인트 보존 정책. 서비스 시작 시와 주기 스크립트(`python -m stage_director.retention`)에서 실행.
 
 규칙 1: 승인된 스레드(jobs.status=done)는 승인 24시간 후 체크포인트만 지운다. 승인본은 stage_sequences.items 에 있고
-        조회는 jobs.result 를 읽는다. 24시간은 Next.js 가 저장에 실패했을 때 같은 스레드에서 결과를 다시 받을 여유다.
+        조회는 jobs.result 를 읽는다. (24시간: Next.js 가 저장에 실패했을 때 같은 스레드에서 결과를 다시 받을 여유)
 규칙 2: 승인되지 않은 스레드(running / waiting_input / error)는 updated_at 이후 7일 방치되면 체크포인트와 jobs 행을 모두 지운다.
-        Supabase 의 draft 행은 Python 이 못 지우므로 다음 조회 때 Next.js 가 404 를 보고 410 + 행 삭제로 정리한다.
+        Supabase 의 draft 행은 Python 이 못 지우므로 다음 조회 때 Next.js 가 404 를 보고 410 + 행 삭제로 정리.
 """
 
 import os

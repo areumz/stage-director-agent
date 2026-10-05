@@ -1,10 +1,10 @@
-"""그래프 작업 실행기 (스펙 §4.2, §6.1, D4).
+"""그래프 작업 실행기
 
-jobs 행이 작업 상태의 진실 공급원이고, 그래프(동기 invoke)는 executor 의 스레드에서 돈다.
-같은 thread_id 의 중복 실행·더블 클릭은 jobs 의 조건부 전이(JobStore.transition)가 막는다.
+jobs 행이 작업 상태의 진실 공급원이고, 그래프(동기 invoke)는 executor 의 스레드에서 돌아감.
+같은 thread_id 의 중복 실행·더블 클릭은 jobs 의 조건부 전이(JobStore.transition)가 막음.
 
-ponytail: 프로세스 하나를 가정한다. 인스턴스가 여러 개면 한쪽이 죽었을 때 다른 쪽이 running 작업을
-알아채지 못한다 — 스케일 아웃이 필요해지면 heartbeat 나 별도 워커로 올린다.
+ponytail: 프로세스 하나를 가정. 인스턴스가 여러 개면 한쪽이 죽었을 때 다른 쪽이 running 작업을
+알아채지 못함 — 스케일 아웃이 필요해지면 heartbeat 나 별도 워커로 올릴 것.
 """
 
 import logging
@@ -70,8 +70,7 @@ class Runner:
         return RunStatus(thread_id=thread_id, status=job.status, interrupt=interrupt, result=job.result, error=job.error)
 
     def resume(self, thread_id: str, req: ResumeRequest) -> RunStatus:
-        # ponytail: 프로세스 하나 가정. 낡은 resume 이 interrupt X 를 읽고 전이하는 사이 다른 실행이 Y 에 도달하는 경쟁을 락으로 막는다.
-        # 인스턴스가 여러 개면 interrupt id 를 jobs 에 저장하고 조건부 전이에서 비교한다.
+        # ponytail: 프로세스 하나 가정
         with self._resume_lock:
             job = self._jobs.get(thread_id)
             if job is None:
@@ -97,7 +96,7 @@ class Runner:
         self._executor.submit(self._run, thread_id, graph_input)
 
     def _run(self, thread_id: str, graph_input: Any) -> None:
-        # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구된다.
+        # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구.
         try:
             result = self._graph.invoke(graph_input, self._config(thread_id))
             if "__interrupt__" in result:

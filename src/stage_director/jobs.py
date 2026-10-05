@@ -1,7 +1,7 @@
-"""jobs 테이블 (스펙 §6.1). 체크포인트만으로는 '실행 중이었는지'를 알 수 없어서 작업 상태를 따로 둔다.
+"""jobs 테이블 (스펙 §6.1). 체크포인트만으로는 '실행 중이었는지'를 알 수 없어서 작업 상태를 따로 둠.
 
 status: running / waiting_input / done / error.
-전이는 모두 조건부(transition)라 같은 thread_id 의 중복 실행과 더블 클릭을 막는 잠금 역할을 한다.
+전이는 모두 조건부(transition)라 같은 thread_id 의 중복 실행과 더블 클릭을 막는 잠금 역할.
 """
 
 import threading
@@ -11,7 +11,6 @@ from typing import Any, Protocol
 
 from psycopg.types.json import Jsonb
 
-# ponytail: progress 컬럼은 분석 작업(5단계)이 필요할 때 ALTER TABLE ... ADD COLUMN IF NOT EXISTS 로 추가한다.
 _DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
     id         text PRIMARY KEY,

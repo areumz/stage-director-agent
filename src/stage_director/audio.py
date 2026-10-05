@@ -1,4 +1,4 @@
-"""음원 서명 URL 에서 오디오를 내려받는다 (무드 해석 입력). URL 은 Next.js 가 만든 것만 온다 (스펙 §3)."""
+"""음원 서명 URL 에서 오디오 다운 (무드 해석 입력)"""
 
 import http.client
 import urllib.request
@@ -12,13 +12,13 @@ DEFAULT_MIME = "audio/mpeg"
 
 
 class AudioError(Exception):
-    """음원을 내려받을 수 없다. 무드 해석은 비치명적이라 호출자가 삼킨다."""
+    """음원을 내려받을 수 없을 때 에러. 무드 해석은 비치명적이라 호출자가 삼킴."""
 
 
 def fetch_audio(url: str, *, opener: Callable[..., Any] = urllib.request.urlopen) -> tuple[bytes, str]:
-    """(바이트, mime) 을 돌려준다. https 만 받는다.
+    """(바이트, mime) 을 돌려주고 https 만 허용.
 
-    ponytail: urlopen 의 리다이렉트는 따라간다. URL 이 신뢰하는 Next.js 가 만든 서명 URL 이라 SSRF 방어는 여기서 안 한다.
+    ponytail: urlopen 의 리다이렉트 따라감. URL 이 신뢰하는 Next.js 가 만든 서명 URL 이라 SSRF 방어는 여기서 x.
     """
     if urlparse(url).scheme != "https":
         raise AudioError("https URL 만 받는다")
