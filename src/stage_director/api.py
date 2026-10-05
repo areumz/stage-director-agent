@@ -3,6 +3,7 @@
 실행: uv run --env-file .env uvicorn --factory stage_director.api:create_app
 """
 
+import logging
 import secrets
 from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -30,6 +31,8 @@ from stage_director.retention import purge
 from stage_director.runner import MAX_CONCURRENT_RUNS, RunError, Runner
 from stage_director.settings import Settings
 
+log = logging.getLogger(__name__)
+
 
 def create_app(
     settings: Settings | None = None,
@@ -42,7 +45,11 @@ def create_app(
     settings = settings or Settings.from_env()
     if not settings.internal_api_key.strip():
         raise ValueError("INTERNAL_API_KEY 가 비어 있다")
-    llm = llm or GeminiClient(settings.gemini_api_key, settings.gemini_model, fallback_model=settings.gemini_fallback_model)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")  # 이미 설정돼 있으면 아무 일도 하지 않는다
+    log.info("Gemini 모델 %s (예비 %s), 모델당 분당 %s회", settings.gemini_model, settings.gemini_fallback_model, settings.gemini_rpm or "무제한")
+    llm = llm or GeminiClient(
+        settings.gemini_api_key, settings.gemini_model, fallback_model=settings.gemini_fallback_model, rpm=settings.gemini_rpm
+    )
     checkpointer_cm = checkpointer_cm or (lambda: postgres_checkpointer(settings.database_url))
 
     def require_internal_key(x_internal_key: str | None = Header(default=None)) -> None:

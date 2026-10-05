@@ -173,3 +173,50 @@ def test_gemini_falls_back_on_unparsable_text_too():
     client, stub = with_models({"primary": SimpleNamespace(text="not json"), "backup": SimpleNamespace(text='{"a": 1}')})
     assert call(client) == {"a": 1}
     assert stub.called == ["primary", "backup"]
+
+
+# ── 분당 요청 수 제한 (모델마다 따로) ─────────────────────────────
+
+
+class RecordingLimiter:
+    """acquire 가 불린 순서를 공유 로그에 남긴다."""
+
+    def __init__(self, rpm, log, name):
+        self.rpm, self.log, self.name = rpm, log, name
+
+    def acquire(self):
+        self.log.append(f"acquire:{self.name}")
+
+
+def limited(results, rpm=7):
+    log, made = [], []
+
+    def factory(rpm_):
+        limiter = RecordingLimiter(rpm_, log, ["primary", "backup"][len(made)])
+        made.append(limiter)
+        return limiter
+
+    stub = PerModelStub(results)
+    original = stub.generate_content
+    stub.generate_content = lambda **kw: (log.append(f"call:{kw['model']}"), original(**kw))[1]
+    client = GeminiClient("unused", "primary", client=SimpleNamespace(models=stub), fallback_model="backup", rpm=rpm, limiter_factory=factory)
+    return client, log, made
+
+
+def test_each_model_gets_its_own_limiter_and_waits_before_every_request():
+    client, log, made = limited({"primary": RuntimeError("503"), "backup": SimpleNamespace(text='{"a": 1}')})
+    assert call(client) == {"a": 1}
+    assert [m.rpm for m in made] == [7, 7]
+    # 실패해서 예비 모델로 넘어가는 시도도 각 모델의 한도를 따로 쓴다
+    assert log == ["acquire:primary", "call:primary", "acquire:backup", "call:backup"]
+
+
+def test_audio_calls_are_limited_too():
+    client, log, _ = limited({"primary": SimpleNamespace(text='{"a": 1}'), "backup": RuntimeError("never")})
+    client.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"a", mime_type="audio/mpeg")
+    assert log == ["acquire:primary", "call:primary"]
+
+
+def test_rpm_zero_means_no_limiter():
+    client, _, made = limited({"primary": SimpleNamespace(text="{}")}, rpm=0)
+    assert call(client) == {} and made == []
