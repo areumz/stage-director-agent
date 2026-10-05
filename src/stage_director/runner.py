@@ -3,8 +3,11 @@
 jobs 행이 작업 상태의 진실 공급원이고, 그래프(동기 invoke)는 executor 의 스레드에서 돌아감.
 같은 thread_id 의 중복 실행·더블 클릭은 jobs 의 조건부 전이(JobStore.transition)가 막음.
 
-ponytail: 프로세스 하나를 가정. 인스턴스가 여러 개면 한쪽이 죽었을 때 다른 쪽이 running 작업을
-알아채지 못함 — 스케일 아웃이 필요해지면 heartbeat 나 별도 워커로 올릴 것.
+작업은 queued(풀 대기) → running → waiting_input / done / error 로 흐른다. 서비스가 시작될 때 queued·running 으로 남은
+작업은 죽은 프로세스의 것이라 error(interrupted) 로 바뀐다(JobStore.fail_running).
+
+ponytail: 프로세스 하나를 가정. 인스턴스가 여러 개면 한쪽이 죽었을 때 다른 쪽이 queued·running 작업을 알아채지 못하고,
+새로 뜬 인스턴스의 fail_running 이 아직 살아 있는 인스턴스의 작업을 죽일 수 있다 — 스케일 아웃이 필요해지면 heartbeat 나 별도 워커로 올릴 것.
 """
 
 import logging
@@ -16,7 +19,7 @@ from langgraph.types import Command
 
 from stage_director.analysis.sections import validate_section_edit
 from stage_director.graph_nodes import MAX_CONCURRENT_PROPOSALS
-from stage_director.jobs import JobStore
+from stage_director.jobs import Job, JobStore
 from stage_director.llm.client import LLMError
 from stage_director.models import (
     FeedbackResume,
@@ -55,26 +58,24 @@ class Runner:
 
     def start(self, thread_id: str, context: SequenceRequest) -> RunStatus:
         """멱등. 새 스레드면 시작, error 면 마지막 체크포인트에서 재개, 그 밖에는 현재 상태를 그대로 돌려준다."""
-        if self._jobs.create(thread_id):
+        if self._jobs.create(thread_id, status="queued"):
             self._submit(thread_id, {"request": context})
-        elif self._jobs.transition(thread_id, from_={"error"}, to="running"):
-            has_checkpoint = bool(self._graph.get_state(self._config(thread_id)).values)
-            self._submit(thread_id, None if has_checkpoint else {"request": context})
+        else:
+            self._graph_job(thread_id)
+            if self._jobs.transition(thread_id, from_={"error"}, to="queued"):
+                has_checkpoint = bool(self._graph.get_state(self._config(thread_id)).values)
+                self._submit(thread_id, None if has_checkpoint else {"request": context})
         return self.status(thread_id)
 
     def status(self, thread_id: str) -> RunStatus:
-        job = self._jobs.get(thread_id)
-        if job is None:
-            raise RunError(404, "thread_not_found")
+        job = self._graph_job(thread_id)
         interrupt = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
         return RunStatus(thread_id=thread_id, status=job.status, interrupt=interrupt, result=job.result, error=job.error)
 
     def resume(self, thread_id: str, req: ResumeRequest) -> RunStatus:
         # ponytail: 프로세스 하나 가정
         with self._resume_lock:
-            job = self._jobs.get(thread_id)
-            if job is None:
-                raise RunError(404, "thread_not_found")
+            job = self._graph_job(thread_id)
             pending = self._pending_interrupt(thread_id) if job.status == "waiting_input" else None
             if pending is None:
                 raise RunError(409, "not_waiting_input")
@@ -82,12 +83,18 @@ class Runner:
                 raise RunError(409, "stale_interrupt")
             value = self._resume_value(thread_id, pending, req)
             # 검증을 다 통과한 뒤에야 전이한다 — 잘못된 요청이 interrupt 를 소모하지 않는다. 이 전이가 더블 클릭 방어다.
-            if not self._jobs.transition(thread_id, from_={"waiting_input"}, to="running"):
+            if not self._jobs.transition(thread_id, from_={"waiting_input"}, to="queued"):
                 raise RunError(409, "not_waiting_input")
         self._submit(thread_id, Command(resume=value))
         return self.status(thread_id)
 
     # ── 내부 ──────────────────────────────────────────────────
+
+    def _graph_job(self, thread_id: str) -> Job:
+        job = self._jobs.get(thread_id)
+        if job is None or job.kind != "graph":  # 분석 작업 id 로 들어온 요청도 모르는 스레드로 취급
+            raise RunError(404, "thread_not_found")
+        return job
 
     def _config(self, thread_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": thread_id}, "max_concurrency": MAX_CONCURRENT_PROPOSALS}
@@ -96,6 +103,8 @@ class Runner:
         self._executor.submit(self._run, thread_id, graph_input)
 
     def _run(self, thread_id: str, graph_input: Any) -> None:
+        if not self._jobs.transition(thread_id, from_={"queued"}, to="running"):
+            return  # 대기하는 사이 다른 인스턴스의 시작 정리(fail_running)가 error 로 바꿨거나 행이 지워졌다. 실행하지 않는다
         # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구.
         try:
             result = self._graph.invoke(graph_input, self._config(thread_id))

@@ -118,7 +118,7 @@ class RunStatus(CamelModel):
     """GET/POST /runs 응답. interrupt·result 는 이미 camelCase 로 직렬화된 dict 이다."""
 
     thread_id: str
-    status: Literal["running", "waiting_input", "done", "error"]
+    status: Literal["queued", "running", "waiting_input", "done", "error"]  # queued: 스레드 풀이 가득 차 순서를 기다리는 중
     interrupt: dict[str, Any] | None = None  # waiting_input 일 때 현재 interrupt 페이로드
     result: dict[str, Any] | None = None  # done 일 때 {sections, items, issues}
     error: str | None = None  # error 일 때 코드 문자열(llm_failed / internal_error / interrupted)

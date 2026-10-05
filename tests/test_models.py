@@ -198,3 +198,8 @@ def test_propose_request_accepts_feedback_and_previous_proposal():
     }
     req = ProposeRequest.model_validate({**BODY, "feedback": "더 어둡게", "previous": previous})
     assert req.feedback == "더 어둡게" and req.previous.rationale == "원본"
+
+
+def test_run_status_accepts_queued():
+    status = RunStatus(thread_id="t1", status="queued")
+    assert status.model_dump(by_alias=True)["status"] == "queued"

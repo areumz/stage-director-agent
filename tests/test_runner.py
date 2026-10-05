@@ -187,7 +187,7 @@ def test_unexpected_errors_do_not_leak_details():
 def test_a_run_killed_before_it_started_is_marked_interrupted_and_can_be_restarted():
     executor = DeferredExecutor()
     runner, jobs, _ = make(executor=executor)
-    assert runner.start("t1", CONTEXT).status == "running"  # 스레드가 돌기 전에 프로세스가 죽었다고 가정
+    assert runner.start("t1", CONTEXT).status == "queued"  # 스레드가 돌기 전에 프로세스가 죽었다고 가정
     executor.pending.clear()  # 죽은 프로세스의 작업은 사라진다
     assert jobs.fail_running() == 1  # 서비스 재시작 시 복구
     assert runner.status("t1").error == "interrupted"
@@ -212,3 +212,43 @@ def test_post_run_failure_marks_error_and_retry_finishes_the_run():
     status = runner.resume("t1", approve(review))
     assert status.status == "error" and status.error == "internal_error"
     assert runner.start("t1", SHORT).status == "done"  # 체크포인트는 이미 끝난 상태: invoke(None) 이 최종값을 돌려준다
+
+
+# ── 5단계: 대기열(queued) ────────────────────────────────────────
+
+
+def test_a_job_waiting_for_a_worker_thread_is_queued_then_runs():
+    executor = DeferredExecutor()
+    runner, _, _ = make(executor=executor)
+    assert runner.start("t1", CONTEXT).status == "queued"  # 스레드 풀이 가득 차 아직 시작 못 했다
+    executor.run_all()
+    assert runner.status("t1").status == "waiting_input"
+
+
+def test_resume_is_queued_until_a_thread_picks_it_up():
+    executor = DeferredExecutor()
+    runner, _, _ = make(GOOD, GOOD, executor=executor)
+    runner.start("t1", CONTEXT)
+    executor.run_all()
+    assert runner.resume("t1", sections_resume(runner.status("t1"))).status == "queued"
+    executor.run_all()
+    assert runner.status("t1").interrupt["kind"] == "review"
+
+
+def test_a_job_failed_while_queued_never_runs():
+    executor = DeferredExecutor()
+    runner, jobs, llm = make(executor=executor)
+    runner.start("t1", CONTEXT)
+    jobs.fail_running()  # 다른 인스턴스의 시작 정리가 이 작업을 먼저 error 로 바꿨다
+    executor.run_all()  # 늦게 깨어난 스레드
+    assert runner.status("t1").error == "interrupted" and llm.calls == []
+
+
+def test_analysis_job_ids_are_unknown_threads():
+    runner, jobs, _ = make()
+    jobs.create("a1", kind="analysis")
+    for call in (lambda: runner.status("a1"), lambda: runner.start("a1", CONTEXT)):
+        with pytest.raises(RunError) as e:
+            call()
+        assert e.value.status == 404 and e.value.code == "thread_not_found"
+    assert jobs.get("a1").status == "running"  # 분석 작업은 건드리지 않는다

@@ -55,13 +55,13 @@ def create_app(
         with checkpointer_cm() as saver:
             store = job_store or PostgresJobStore(saver.conn)
             purge(store, saver)  # 먼저: fail_running 이 updated_at 을 갱신하기 전에 방치된 작업을 정리
-            store.fail_running()  # 죽기 전에 running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
+            store.fail_running()  # 죽기 전에 queued·running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
             pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
             app.state.runner = Runner(build_sequence_graph(llm, checkpointer=saver), store, pool)
             try:
                 yield
             finally:
-                # shutdown 은 이미 도는 그래프 스레드를 멈추지 못한다(인터프리터 종료 때 join). 그 작업은 running 으로 남고 다음 기동의 fail_running 이 복구
+                # shutdown 은 이미 도는 그래프 스레드를 멈추지 못한다(인터프리터 종료 때 join). 그 작업은 queued·running 으로 남고 다음 기동의 fail_running 이 복구
                 if executor is None:
                     pool.shutdown(wait=False, cancel_futures=True)
 
