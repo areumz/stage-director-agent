@@ -15,6 +15,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from stage_director.analyzer import (
+    MAX_CONCURRENT_ANALYSES,
+    AnalysisRunner,
+    build_result,
+)
 from stage_director.audio import fetch_audio
 from stage_director.checkpointer import postgres_checkpointer
 from stage_director.graph import build_sequence_graph
@@ -22,6 +27,8 @@ from stage_director.jobs import JobStore, PostgresJobStore
 from stage_director.llm.client import LLMClient, LLMError
 from stage_director.llm.gemini import GeminiClient
 from stage_director.models import (
+    AnalysisStatus,
+    AnalyzeCreate,
     ProposeRequest,
     ResumeRequest,
     RunCreate,
@@ -42,8 +49,9 @@ def create_app(
     checkpointer_cm: Callable[[], AbstractContextManager[BaseCheckpointSaver]] | None = None,
     job_store: JobStore | None = None,
     executor: Executor | None = None,
+    analysis_executor: Executor | None = None,
 ) -> FastAPI:
-    """settings·llm·checkpointer_cm·job_store·executor 는 테스트에서 주입. 운영에서는 환경변수 + Gemini + Postgres(Neon) + 스레드 풀"""
+    """settings·llm·checkpointer_cm·job_store·executor·analysis_executor 는 테스트에서 주입. 운영에서는 환경변수 + Gemini + Postgres(Neon) + 스레드 풀 2개(그래프·분석)"""
     settings = settings or Settings.from_env()
     if not settings.internal_api_key.strip():
         raise ValueError("INTERNAL_API_KEY 가 비어 있다")
@@ -68,12 +76,18 @@ def create_app(
             pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
             graph = build_sequence_graph(llm, checkpointer=saver, fetch=partial(fetch_audio, allowed_hosts=settings.audio_allowed_hosts))
             app.state.runner = Runner(graph, store, pool)
+            analysis_pool = analysis_executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSES)
+            app.state.analyzer = AnalysisRunner(
+                store, analysis_pool, fetch=fetch_audio, build=build_result, allowed_hosts=settings.audio_allowed_hosts
+            )
             try:
                 yield
             finally:
                 # shutdown 은 이미 도는 그래프 스레드를 멈추지 못한다(인터프리터 종료 때 join). 그 작업은 queued·running 으로 남고 다음 기동의 fail_running 이 복구
                 if executor is None:
                     pool.shutdown(wait=False, cancel_futures=True)
+                if analysis_executor is None:
+                    analysis_pool.shutdown(wait=False, cancel_futures=True)
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -107,5 +121,13 @@ def create_app(
     @app.post("/runs/{thread_id}/resume", status_code=202, dependencies=[Depends(require_internal_key)])
     def resume_run(thread_id: str, body: ResumeRequest) -> RunStatus:
         return app.state.runner.resume(thread_id, body)
+
+    @app.post("/analyze", status_code=202, dependencies=[Depends(require_internal_key)])
+    def create_analysis(body: AnalyzeCreate) -> AnalysisStatus:
+        return app.state.analyzer.start(body.job_id, body.audio_url)
+
+    @app.get("/analyze/{job_id}", dependencies=[Depends(require_internal_key)])
+    def get_analysis(job_id: str) -> AnalysisStatus:
+        return app.state.analyzer.status(job_id)
 
     return app

@@ -151,3 +151,20 @@ class ApproveResume(CamelModel):
 
 
 ResumeRequest = Annotated[SectionsResume | FeedbackResume | ApproveResume, Field(discriminator="kind")]
+
+
+class AnalyzeCreate(CamelModel):
+    """POST /analyze 본문. job_id 는 Next.js 가 정한 audio_tracks.id."""
+
+    job_id: str = Field(min_length=1, max_length=64)
+    audio_url: str = Field(min_length=1, max_length=2048)  # 서명 URL 은 토큰 때문에 길다
+
+
+class AnalysisStatus(CamelModel):
+    """GET/POST /analyze 응답."""
+
+    job_id: str
+    status: Literal["queued", "running", "done", "error"]
+    progress: float | None = None  # 0.0~1.0. 단계 단위로만 움직인다
+    result: dict[str, Any] | None = None  # done 일 때 {"analysis": {...AnalysisSnapshot camelCase}, "fileHash": sha256}
+    error: str | None = None  # audio_unavailable / decode_failed / too_long / internal_error / interrupted

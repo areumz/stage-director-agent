@@ -292,3 +292,60 @@ def test_run_audio_fetches_use_the_configured_host_allowlist(monkeypatch):
     with TestClient(app) as c:
         assert c.post("/runs", json=body, headers=AUTH).json()["status"] == "waiting_input"
     assert seen["allowed_hosts"] == ("supabase.co",)
+
+
+# ── /analyze ──────────────────────────────────────────────────
+
+ANALYZE_BODY = {"jobId": "a1", "audioUrl": "https://abc.supabase.co/a.mp3?token=t"}
+ANALYSIS_RESULT = {"analysis": {"durationSec": 12.5, "bpm": 100.0}, "fileHash": "h"}
+
+
+def analyze_app(monkeypatch, allowed=("supabase.co",)):
+    monkeypatch.setattr("stage_director.api.fetch_audio", lambda url, **kw: (b"audio", "audio/mpeg"))
+    monkeypatch.setattr("stage_director.api.build_result", lambda data, mime: ANALYSIS_RESULT)
+    settings = Settings(
+        internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused", database_url="unused", audio_allowed_hosts=allowed
+    )
+    return create_app(
+        settings,
+        FakeLLM(),
+        lambda: contextlib.nullcontext(InMemorySaver()),
+        job_store=InMemoryJobStore(),
+        executor=InlineExecutor(),
+        analysis_executor=InlineExecutor(),
+    )
+
+
+@pytest.mark.parametrize(("method", "path"), [("post", "/analyze"), ("get", "/analyze/a1")])
+def test_analyze_endpoints_require_the_internal_key(monkeypatch, method, path):
+    with TestClient(analyze_app(monkeypatch)) as c:
+        assert c.request(method, path, json=ANALYZE_BODY).status_code == 401
+
+
+def test_create_analysis_returns_202_and_the_result(monkeypatch):
+    with TestClient(analyze_app(monkeypatch)) as c:
+        response = c.post("/analyze", json=ANALYZE_BODY, headers=AUTH)
+        polled = c.get("/analyze/a1", headers=AUTH)
+    assert response.status_code == 202
+    assert response.json() == {"jobId": "a1", "status": "done", "progress": 1.0, "result": ANALYSIS_RESULT, "error": None}
+    assert polled.json() == response.json()
+
+
+def test_analyze_rejects_a_host_outside_the_allowlist(monkeypatch):
+    with TestClient(analyze_app(monkeypatch)) as c:
+        response = c.post("/analyze", json={**ANALYZE_BODY, "audioUrl": "https://evil.example.com/a.mp3"}, headers=AUTH)
+    assert response.status_code == 422 and response.json()["detail"] == "invalid_audio_url"
+
+
+def test_unknown_analysis_is_404(monkeypatch):
+    with TestClient(analyze_app(monkeypatch)) as c:
+        response = c.get("/analyze/nope", headers=AUTH)
+    assert response.status_code == 404 and response.json()["detail"] == "job_not_found"
+
+
+def test_run_and_analysis_ids_do_not_cross(monkeypatch):
+    with TestClient(analyze_app(monkeypatch)) as c:
+        c.post("/analyze", json=ANALYZE_BODY, headers=AUTH)
+        c.post("/runs", json=RUN_BODY, headers=AUTH)
+        assert c.get("/runs/a1", headers=AUTH).status_code == 404
+        assert c.get("/analyze/run-1", headers=AUTH).status_code == 404
