@@ -1,3 +1,4 @@
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -108,3 +109,67 @@ def test_gemini_audio_wraps_sdk_failures():
     client, _ = gemini_with(RuntimeError("network down"))
     with pytest.raises(LLMError, match="network down"):
         client.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"a", mime_type="audio/mpeg")
+
+
+# ── 예비 모델 (주 모델이 실패하면 한 번 더) ──────────────────────
+
+
+class PerModelStub:
+    """모델 이름별로 정해 둔 응답(또는 예외)을 돌려주고, 어떤 모델을 불렀는지 순서대로 기록."""
+
+    def __init__(self, results):
+        self.results = results
+        self.called = []
+
+    def generate_content(self, **kwargs):
+        self.called.append(kwargs["model"])
+        result = self.results[kwargs["model"]]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def with_models(results, fallback_model="backup"):
+    stub = PerModelStub(results)
+    return GeminiClient("unused", "primary", client=SimpleNamespace(models=stub), fallback_model=fallback_model), stub
+
+
+def test_gemini_falls_back_when_the_primary_model_fails(caplog):
+    client, stub = with_models({"primary": RuntimeError("503 UNAVAILABLE"), "backup": SimpleNamespace(text='{"a": 1}')})
+    with caplog.at_level(logging.WARNING, logger="stage_director.llm.gemini"):
+        assert call(client) == {"a": 1}
+    assert stub.called == ["primary", "backup"]
+    assert "503 UNAVAILABLE" in caplog.text and "backup" in caplog.text  # 왜 예비 모델로 갔는지 로그에 남김
+
+
+def test_gemini_does_not_call_the_fallback_when_the_primary_succeeds():
+    client, stub = with_models({"primary": SimpleNamespace(text='{"a": 1}'), "backup": RuntimeError("never")})
+    assert call(client) == {"a": 1}
+    assert stub.called == ["primary"]
+
+
+def test_gemini_raises_the_last_error_when_both_models_fail():
+    client, stub = with_models({"primary": RuntimeError("primary down"), "backup": RuntimeError("backup down")})
+    with pytest.raises(LLMError, match="backup down"):
+        call(client)
+    assert stub.called == ["primary", "backup"]
+
+
+@pytest.mark.parametrize("fallback_model", [None, "", "primary"])
+def test_gemini_without_a_distinct_fallback_tries_only_the_primary(fallback_model):
+    client, stub = with_models({"primary": RuntimeError("down")}, fallback_model=fallback_model)
+    with pytest.raises(LLMError, match="down"):
+        call(client)
+    assert stub.called == ["primary"]
+
+
+def test_gemini_audio_calls_also_fall_back():
+    client, stub = with_models({"primary": RuntimeError("503"), "backup": SimpleNamespace(text='{"a": 1}')})
+    assert client.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"a", mime_type="audio/mpeg") == {"a": 1}
+    assert stub.called == ["primary", "backup"]
+
+
+def test_gemini_falls_back_on_unparsable_text_too():
+    client, stub = with_models({"primary": SimpleNamespace(text="not json"), "backup": SimpleNamespace(text='{"a": 1}')})
+    assert call(client) == {"a": 1}
+    assert stub.called == ["primary", "backup"]

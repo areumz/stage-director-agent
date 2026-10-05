@@ -42,7 +42,7 @@ def create_app(
     settings = settings or Settings.from_env()
     if not settings.internal_api_key.strip():
         raise ValueError("INTERNAL_API_KEY 가 비어 있다")
-    llm = llm or GeminiClient(settings.gemini_api_key, settings.gemini_model)
+    llm = llm or GeminiClient(settings.gemini_api_key, settings.gemini_model, fallback_model=settings.gemini_fallback_model)
     checkpointer_cm = checkpointer_cm or (lambda: postgres_checkpointer(settings.database_url))
 
     def require_internal_key(x_internal_key: str | None = Header(default=None)) -> None:

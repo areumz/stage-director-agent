@@ -131,6 +131,16 @@ def test_settings_from_env(monkeypatch):
     assert settings.gemini_model  # 기본 모델이 있다
 
 
+def test_settings_fallback_model_has_a_default_and_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_KEY", "k")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x/y")
+    monkeypatch.delenv("GEMINI_FALLBACK_MODEL", raising=False)
+    assert Settings.from_env().gemini_fallback_model  # 비워 두면 기본 예비 모델
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "my-backup")
+    assert Settings.from_env().gemini_fallback_model == "my-backup"
+
+
 @pytest.mark.parametrize("missing", ["INTERNAL_API_KEY", "GEMINI_API_KEY", "DATABASE_URL"])
 def test_settings_refuse_to_start_without_keys(monkeypatch, missing):
     monkeypatch.setenv("INTERNAL_API_KEY", "k")
