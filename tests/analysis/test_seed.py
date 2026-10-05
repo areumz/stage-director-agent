@@ -43,6 +43,13 @@ def test_main_keeps_going_after_an_undecodable_file_and_exits_nonzero(wav, tmp_p
     assert "decode_failed" in capsys.readouterr().out
 
 
+def test_main_keeps_going_after_a_missing_path_and_exits_nonzero(wav, tmp_path, capsys):
+    out = tmp_path / "out"
+    assert main([str(tmp_path / "없는 파일.mp3"), str(wav), "--out", str(out)]) == 1
+    assert (out / "곡 이름.json").exists()
+    assert "없는 파일.mp3: 실패" in capsys.readouterr().out
+
+
 def test_analyze_seed_raises_for_undecodable_audio(tmp_path):
     bad = tmp_path / "bad.mp3"
     bad.write_bytes(b"not audio" * 100)

@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{path.name}: 실패 ({e.code})")
             failed += 1
             continue
+        except OSError as e:  # 없는·읽을 수 없는 경로도 한 파일의 실패일 뿐이다
+            print(f"{path.name}: 실패 ({e.strerror or e})")
+            failed += 1
+            continue
         target = args.out / f"{path.stem}.json"
         target.write_text(json.dumps(seed, ensure_ascii=False, indent=2), encoding="utf-8")
         snapshot = parse_analysis(seed["analysis"])
