@@ -21,6 +21,7 @@ from stage_director.analyzer import (
     build_result,
 )
 from stage_director.audio import fetch_audio
+from stage_director.background import Periodic
 from stage_director.checkpointer import postgres_checkpointer
 from stage_director.graph import build_sequence_graph
 from stage_director.jobs import JobStore, PostgresJobStore
@@ -36,7 +37,7 @@ from stage_director.models import (
     SectionProposal,
 )
 from stage_director.propose import propose_section
-from stage_director.retention import purge
+from stage_director.retention import RETENTION_INTERVAL_SEC, purge
 from stage_director.runner import MAX_CONCURRENT_RUNS, RunError, Runner
 from stage_director.settings import Settings
 
@@ -80,9 +81,12 @@ def create_app(
             app.state.analyzer = AnalysisRunner(
                 store, analysis_pool, fetch=fetch_audio, build=build_result, allowed_hosts=settings.audio_allowed_hosts
             )
+            retention = Periodic(lambda: purge(store, saver), RETENTION_INTERVAL_SEC, "retention")  # 오래 떠 있는 인스턴스도 정리한다
+            retention.start()
             try:
                 yield
             finally:
+                retention.stop()
                 # shutdown 은 이미 도는 그래프 스레드를 멈추지 못한다(인터프리터 종료 때 join). 그 작업은 queued·running 으로 남고 다음 기동의 fail_running 이 복구
                 if executor is None:
                     pool.shutdown(wait=False, cancel_futures=True)
