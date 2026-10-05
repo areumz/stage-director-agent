@@ -8,12 +8,14 @@ import secrets
 from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import AbstractContextManager, asynccontextmanager
+from functools import partial
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from stage_director.audio import fetch_audio
 from stage_director.checkpointer import postgres_checkpointer
 from stage_director.graph import build_sequence_graph
 from stage_director.jobs import JobStore, PostgresJobStore
@@ -64,7 +66,8 @@ def create_app(
             purge(store, saver)  # 먼저: fail_running 이 updated_at 을 갱신하기 전에 방치된 작업을 정리
             store.fail_running()  # 죽기 전에 queued·running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
             pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
-            app.state.runner = Runner(build_sequence_graph(llm, checkpointer=saver), store, pool)
+            graph = build_sequence_graph(llm, checkpointer=saver, fetch=partial(fetch_audio, allowed_hosts=settings.audio_allowed_hosts))
+            app.state.runner = Runner(graph, store, pool)
             try:
                 yield
             finally:

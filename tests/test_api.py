@@ -7,6 +7,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from contracts.stage_state import default_stage_state, merge_stage_state
 from stage_director.api import create_app
+from stage_director.audio import AudioError
 from stage_director.jobs import InMemoryJobStore
 from stage_director.llm.client import LLMError
 from stage_director.llm.fake import FakeLLM
@@ -273,3 +274,21 @@ def test_app_refuses_to_start_when_checkpointer_is_unavailable():
     app = create_app(settings, FakeLLM(), broken_checkpointer)
     with pytest.raises(ConnectionError), TestClient(app):
         pass
+
+
+def test_run_audio_fetches_use_the_configured_host_allowlist(monkeypatch):
+    seen = {}
+
+    def fake_fetch(url, **kwargs):
+        seen.update(kwargs)
+        raise AudioError("테스트에는 네트워크가 없다")  # 무드 해석은 비치명적이라 실행은 계속된다
+
+    monkeypatch.setattr("stage_director.api.fetch_audio", fake_fetch)
+    settings = Settings(
+        internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused", database_url="unused", audio_allowed_hosts=("supabase.co",)
+    )
+    app = create_app(settings, FakeLLM(), lambda: contextlib.nullcontext(InMemorySaver()), job_store=InMemoryJobStore(), executor=InlineExecutor())
+    body = {"threadId": "r1", "context": {**SEQUENCE_REQUEST, "audioUrl": "https://abc.supabase.co/a.mp3"}}
+    with TestClient(app) as c:
+        assert c.post("/runs", json=body, headers=AUTH).json()["status"] == "waiting_input"
+    assert seen["allowed_hosts"] == ("supabase.co",)

@@ -31,3 +31,9 @@ def test_invalid_rpm_fails_at_startup(monkeypatch, value):
     monkeypatch.setenv("GEMINI_RPM", value)
     with pytest.raises(RuntimeError, match="GEMINI_RPM"):
         Settings.from_env()
+
+
+def test_audio_allowed_hosts_are_split_trimmed_and_lowercased(monkeypatch):
+    assert Settings.from_env().audio_allowed_hosts == ()
+    monkeypatch.setenv("AUDIO_URL_ALLOWED_HOSTS", " Abc.supabase.co ,, cdn.example.com ")
+    assert Settings.from_env().audio_allowed_hosts == ("abc.supabase.co", "cdn.example.com")

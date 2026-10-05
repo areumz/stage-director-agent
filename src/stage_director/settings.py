@@ -16,6 +16,7 @@ class Settings:
     database_url: str  # LangGraph 체크포인터. 로컬 docker-compose, 배포 시 Neon (스펙 D2)
     gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
     gemini_rpm: int = DEFAULT_GEMINI_RPM
+    audio_allowed_hosts: tuple[str, ...] = ()  # 음원 URL 호스트 허용 목록(접미사 일치). 비우면 공인 IP 검사만 한다. 운영에서는 Supabase 호스트를 넣는다
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,4 +43,5 @@ class Settings:
             database_url=required("DATABASE_URL"),
             gemini_fallback_model=os.environ.get("GEMINI_FALLBACK_MODEL") or DEFAULT_GEMINI_FALLBACK_MODEL,
             gemini_rpm=non_negative_int("GEMINI_RPM", DEFAULT_GEMINI_RPM),
+            audio_allowed_hosts=tuple(h.strip().lower() for h in os.environ.get("AUDIO_URL_ALLOWED_HOSTS", "").split(",") if h.strip()),
         )
