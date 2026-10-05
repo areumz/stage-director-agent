@@ -349,3 +349,31 @@ def test_run_and_analysis_ids_do_not_cross(monkeypatch):
         c.post("/runs", json=RUN_BODY, headers=AUTH)
         assert c.get("/runs/a1", headers=AUTH).status_code == 404
         assert c.get("/analyze/run-1", headers=AUTH).status_code == 404
+
+
+# ── 상태 확인 ─────────────────────────────────────────────────
+
+
+def test_healthz_needs_no_key_and_reveals_nothing_else():
+    with TestClient(runs_app()) as c:
+        response = c.get("/healthz")
+    assert response.status_code == 200 and response.json() == {"status": "ok"}
+
+
+def test_readyz_reports_ok_when_the_job_store_answers():
+    with TestClient(runs_app()) as c:
+        response = c.get("/readyz")
+    assert response.status_code == 200 and response.json() == {"status": "ok"}
+
+
+def test_readyz_returns_503_without_leaking_the_error_when_the_database_is_down():
+    class DownStore(InMemoryJobStore):
+        def get(self, job_id):
+            raise RuntimeError("connection to server at secret-host failed")
+
+    settings = Settings(internal_api_key=KEY, gemini_api_key="unused", gemini_model="unused", database_url="unused")
+    app = create_app(settings, FakeLLM(), lambda: contextlib.nullcontext(InMemorySaver()), job_store=DownStore(), executor=InlineExecutor())
+    with TestClient(app) as c:
+        response = c.get("/readyz")
+    assert response.status_code == 503 and response.json() == {"status": "db_unavailable"}
+    assert "secret-host" not in response.text

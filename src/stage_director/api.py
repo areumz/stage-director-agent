@@ -76,6 +76,7 @@ def create_app(
             store.fail_running()  # 죽기 전에 queued·running 이던 작업을 error(interrupted) 로. 사용자가 다시 시도하면 체크포인트에서 재개
             pool = executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_RUNS)
             graph = build_sequence_graph(llm, checkpointer=saver, fetch=partial(fetch_audio, allowed_hosts=settings.audio_allowed_hosts))
+            app.state.jobs = store
             app.state.runner = Runner(graph, store, pool)
             analysis_pool = analysis_executor or ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSES)
             app.state.analyzer = AnalysisRunner(
@@ -105,6 +106,21 @@ def create_app(
     async def _run_error(request, exc):
         content = {"detail": exc.code, **({"message": exc.message} if exc.message else {})}
         return JSONResponse(status_code=exc.status, content=content)
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        # 호스팅의 상태 확인용(키 없이 호출). 프로세스가 요청을 받는지만 본다 — DB 가 느려졌다고 플랫폼이 서비스를 내리면 안 된다
+        return {"status": "ok"}
+
+    @app.get("/readyz")
+    def readyz() -> JSONResponse:
+        # 사람·모니터링용. DB 한 번 왕복(없는 id 조회)으로 전용 Postgres 에 닿는지 본다. 내용은 노출하지 않는다
+        try:
+            app.state.jobs.get("__readyz__")
+        except Exception:
+            log.exception("readyz: DB 확인 실패")
+            return JSONResponse(status_code=503, content={"status": "db_unavailable"})
+        return JSONResponse(content={"status": "ok"})
 
     @app.post("/propose", dependencies=[Depends(require_internal_key)])
     def propose(req: ProposeRequest) -> SectionProposal:
