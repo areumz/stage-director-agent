@@ -11,6 +11,8 @@ from collections.abc import Callable
 from concurrent.futures import Executor
 from typing import Any
 
+import soundfile
+
 from stage_director.analysis.measure import measure_file
 from stage_director.audio import AudioError, check_url, fetch_audio
 from stage_director.jobs import Job, JobStore
@@ -47,6 +49,12 @@ def build_result(data: bytes, mime: str, measure: Callable[[str], Any] = measure
     with tempfile.NamedTemporaryFile(suffix=SUFFIX_BY_MIME.get(mime, ".bin")) as f:
         f.write(data)
         f.flush()
+        try:
+            header_sec = soundfile.info(f.name).duration
+        except (soundfile.SoundFileError, RuntimeError):  # 헤더를 못 읽는 형식은 막지 않고 measure 에 맡긴다(못 읽으면 거기서 decode_failed)
+            header_sec = 0.0
+        if header_sec > MAX_DURATION_SEC + DURATION_TOLERANCE_SEC:  # 8kHz mp3 는 30MiB 에 수 시간이 들어가 디코딩하면 메모리가 터진다
+            raise AnalysisError("too_long")
         try:
             snapshot = measure(f.name)
         except Exception as e:  # librosa·soundfile·audioread 가 포맷마다 다른 예외를 던진다

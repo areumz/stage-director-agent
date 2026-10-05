@@ -176,6 +176,24 @@ def test_build_result_rejects_empty_and_over_long_audio(duration, code):
     assert e.value.code == code
 
 
+def test_build_result_rejects_over_long_audio_from_the_header_without_decoding_it():
+    buf = io.BytesIO()
+    soundfile.write(buf, np.zeros(20_000), 100, format="WAV")  # 100Hz x 20000 샘플 = 200초
+
+    def measure(path):
+        raise AssertionError("헤더로 거절해야 하므로 디코딩하면 안 된다")
+
+    with pytest.raises(AnalysisError) as e:
+        build_result(buf.getvalue(), "audio/wav", measure=measure)
+    assert e.value.code == "too_long"
+
+
+def test_build_result_lets_a_short_wav_header_through_to_measure():
+    buf = io.BytesIO()
+    soundfile.write(buf, np.zeros(1_000), 100, format="WAV")  # 10초
+    assert build_result(buf.getvalue(), "audio/wav", measure=lambda path: snapshot(10.0))["analysis"]["durationSec"] == 10.0
+
+
 def test_build_result_allows_a_few_hundred_milliseconds_over_180_seconds():
     assert build_result(b"x", "audio/mpeg", measure=lambda path: snapshot(180.4))["analysis"]["durationSec"] == 180.4
 
