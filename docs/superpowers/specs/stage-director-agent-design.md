@@ -74,10 +74,15 @@ Python이 요청으로 받는 컨텍스트: 분석 JSON, 곡 메타(제목·장�
 | `POST /api/sequences/{id}/resume` | 본문 `{interruptId, kind: "sections"|"feedback"|"approve", payload}`. Python은 `waiting_input`이면서 `interruptId`가 현재 것과 같을 때만 받는다. 아니면 409 (더블 클릭·낡은 화면 방어) |
 | 승인 완료 | Python `done` 응답의 최종 시퀀스를 Next.js가 §7 검증 후 `items` 저장, `status=approved`, `approved_at=now()` |
 
-시퀀스 그래프 계획은 위 `/runs` 멱등 프로토콜 대신 잠정적인 `POST /sequence`(동기, 매 호출 새
-`threadId`)를 먼저 구현했다. 체크포인터·그래프 로직은 이미 이 엔드포인트 뒤에 있으므로, 4단계는
-`/runs`·`/runs/{threadId}`·`/resume`로 **엔드포인트만 교체**하면 된다(그래프 자체는 바뀌지 않고
-interrupt 두 개만 추가된다).
+Python 쪽 `/runs` 프로토콜은 4단계(사람 개입)에서 구현했다. 잠정 `POST /sequence` 는 삭제됐다.
+
+| Python 엔드포인트 | 동작 |
+| --- | --- |
+| `POST /runs {threadId, context}` → 202 | 멱등. 새 스레드면 `jobs` 행을 만들고 백그라운드 스레드에서 그래프를 시작한다. 이미 있으면 현재 상태를 돌려주고, `error` 면 마지막 체크포인트(없으면 처음)에서 재개한다 |
+| `GET /runs/{threadId}` → 200 `{status, interrupt?, result?, error?}` | `waiting_input` 이면 현재 interrupt 페이로드, `done` 이면 `jobs.result`(`{sections, items, issues}`)를 돌려준다. 모르는 스레드(존재한 적 없거나 보존 정책으로 삭제)는 404 `thread_not_found` — Next.js 가 410 으로 바꾸고 초안 행을 삭제한다 |
+| `POST /runs/{threadId}/resume {interruptId, kind, payload}` → 202 | 409: `not_waiting_input`(더블 클릭 포함) · `stale_interrupt` · `kind_mismatch` / 422: `invalid_sections` · `invalid_targets` / 404 |
+
+`context` 는 기존 곡 전체 요청(`track`, `artist`, `presets`, `analysis`, `durationSec`)에 선택 필드 `audioUrl`(음원 서명 URL, https, 무드 해석용)을 더한 것이다.
 
 Python 엔드포인트는 모두 `X-Internal-Key` 필수이며 키는 서버 환경변수에만 둔다. `POST /runs`는 같은 `threadId`로 다시 호출되면 멱등하다(이미 있으면 현재 상태 반환, 마지막 체크포인트에서 재개 필요 시에만 재실행).
 
@@ -136,11 +141,11 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | 테이블 | 소유 | 내용 |
 | --- | --- | --- |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | LangGraph | `setup()`이 생성. 스키마를 직접 설계하지 않는다 |
-| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id` 또는 `jobId`), `kind`(`analysis`/`graph`), `status`(`running/waiting_input/done/error`), `progress real null`, `result jsonb null`, `error text null`, `created_at`, `updated_at` |
+| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id`), `status`(`running/waiting_input/done/error`), `result jsonb null`, `error text null`, `updated_at`. 4단계에는 그래프 작업만 있어 `kind`·`created_at`·`progress` 컬럼을 두지 않는다 — 분석 작업(`jobId`)을 넣는 5단계에서 `kind`(`analysis`/`graph`)와 `progress` 등을 추가한다 |
 
 `jobs`가 필요한 이유: 백그라운드 실행 중 Python 프로세스가 죽으면 체크포인트만으로는 "실행 중이었는지"를 알 수 없다. 서비스 시작 시 `status=running`인 행을 `error(interrupted)`로 바꾸고, 사용자가 "다시 시도"하면 같은 `thread_id`로 마지막 체크포인트에서 재개한다.
 
-상태 판정(그래프 작업): 체크포인트의 `next`가 비고 `jobs.status=done`이면 완료, `tasks`에 interrupt가 있으면 `waiting_input`, 그 외 `jobs.status`를 그대로 신뢰한다.
+상태 판정(그래프 작업): `jobs.status` 는 Runner 가 전이 시점(시작 `running`, interrupt 도달 `waiting_input`, 종료 `done`, 예외 `error`)에 조건부 UPDATE 로 직접 기록한다. 대기 중인 interrupt 페이로드는 체크포인트의 `tasks[].interrupts` 에서 읽는다. `jobs` 에는 `progress`·`kind`·`created_at` 컬럼이 없다(분석 작업이 필요해지면 추가).
 
 ### 6.2 `thread_id`
 
@@ -162,8 +167,8 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 - 구간 경계는 interrupt #1에서만 바뀐다. 이후 피드백은 기존 구간의 `state`·`rationale`만 재생성하므로 `idx`가 안정적이다.
 - `interruptId = f"{thread_id}:{revision}:{kind}"`. 낡은 화면에서 온 resume은 거부된다.
-- 부분 재생성 불변식: 피드백 라우팅이 지정한 `targets` 밖의 `proposals[idx]`는 바이트 단위로 같아야 한다(테스트 대상).
-- Interrupt 페이로드: #1 `{kind:"confirm_sections", sections, energyCurve, durationSec}`, #2 `{kind:"review", items, issues}`. Resume 페이로드: #1 `{sections}`(연속 덮음·최소 길이 검증 후 수용), #2 `{action:"approve"}` 또는 `{action:"feedback", text}`.
+- 부분 재생성 불변식: 사용자가 지정한 `targets` 밖의 `proposals[idx]`는 바이트 단위로 같아야 한다(테스트 대상).
+- Interrupt 페이로드: #1 `{interruptId, kind:"confirm_sections", sections:[{label,startSec,endSec,mood}], energyCurve, durationSec}`, #2 `{interruptId, kind:"review", items, issues}`. Resume 페이로드(`POST …/resume` 본문 `{interruptId, kind, payload}`): #1 `kind:"sections"`, `payload:{sections}`(연속 덮음·최소 길이·개수·라벨 검증 후 수용, 위반 시 422), #2 `kind:"approve"`(payload 없음) 또는 `kind:"feedback"`, `payload:{text, targets:[idx]}`. **`targets` 는 사용자가 지정한다**(LLM 라우터 없음). 피드백 턴의 자동 재생성도 `targets` 안으로 제한되고, 피드백 턴마다 자동 재생성 예산(2회)이 다시 주어진다.
 
 ### 6.4 보존 정책
 
@@ -171,7 +176,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 **규칙 1. 승인된 스레드: 승인 24시간 후 체크포인트만 삭제**
 
-- 대상: 승인이 끝난 그래프 작업(`jobs.kind=graph`, `jobs.status=done`).
+- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 4단계에서는 `jobs` 의 모든 행이 그래프 작업이다).
 - 기준 시각: `jobs.status`가 `done`이 된 시각(= 사용자가 승인해 최종 시퀀스가 나온 시점). Python은 Supabase의 `approved_at`을 볼 수 없으므로 이 시각을 쓴다.
 - 삭제 범위: LangGraph 체크포인트(실행 기록)만 `adelete_thread`로 지운다. 승인본은 이미 `stage_sequences.items`에 있고 이후 조회는 그 행을 읽으므로 체크포인트는 필요 없다.
 - 24시간을 두는 이유: 승인 직후 Next.js가 최종 시퀀스를 저장하다 실패해도 같은 스레드에서 결과를 다시 받아 저장할 수 있게 하는 여유 시간이다.
@@ -182,7 +187,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 - 기준 시각: `jobs.updated_at`(마지막 활동). 재개나 피드백이 있으면 갱신되므로 7일간 아무 활동이 없을 때만 해당한다.
 - 삭제 범위: Python 쪽은 체크포인트와 `jobs` 행을 모두 지운다. Supabase의 `draft` 행은 Python이 지우지 못하므로(Supabase에 쓰지 않는다), 다음 조회 때 Next.js가 지운다. 스레드가 삭제된 초안을 조회하면 Python이 스레드를 모른다고 답하고, Next.js가 410을 돌려주며 초안 행을 삭제한다. UI는 "세션이 만료되었습니다. 다시 시작하세요"를 표시한다.
 
-**참고: 분석 작업 결과.** 분석 작업(`jobs.kind=analysis`)의 `jobs.result`는 완료 후 7일 보관한다. 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 것이며(§4.1), 위 두 규칙과 별개다.
+**참고: 분석 작업 결과.** 분석 작업(5단계에서 `kind=analysis` 로 추가)의 `jobs.result`는 완료 후 7일 보관한다. 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 것이며(§4.1), 위 두 규칙과 별개다.
 
 ## 7. 검증
 
@@ -200,7 +205,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 | 상황 | 동작 |
 | --- | --- |
-| LLM 호출 실패 | 노드 단위 재시도 2회 → 실패 시 `jobs.status=error`와 메시지. 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
+| LLM 호출 실패 | 호출마다 주 모델 실패 시 예비 모델(`GEMINI_FALLBACK_MODEL`)로 1회 더 시도하고, 노드 단위 재시도 2회(무드 해석도 2회) → 실패 시 `jobs.status=error`와 메시지. 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
 | 구조 출력이 스키마 불일치 | 1층에서 폴백·clamp, 필드 하나가 깨져도 나머지 유지(필드별 방어) |
 | Python 서비스 다운 | Next.js가 502. 시드 곡의 캐시된 예시 시퀀스로 폴백(기획서 §11, Next.js 측 구현) |
 | 분석 실패 | `analysis_status=error`, 사용자에게 재시도 또는 에너지 곡선 기반 경계 제안 모드 안내(1단계 스파이크 결과에 따라 확정) |
@@ -259,7 +264,7 @@ LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. G
 
 | 항목 | 기본값 | 확정 시점 |
 | --- | --- | --- |
-| LLM provider | Gemini, 클라이언트 주입 구조. 텍스트 입력 구조화 출력은 싱글 제안 계획에서 확정(기본 모델 `gemini-3.8-flash`, 환경변수 `GEMINI_MODEL` 로 교체). 오디오 입력 무드 해석은 4단계(사람 개입)로 미룬다 — `sections.mood`는 interrupt #1 에서만 쓰여 3단계에는 소비자가 없다 | 텍스트: 확정 / 오디오: 4단계 |
+| LLM provider | Gemini, 클라이언트 주입 구조. 텍스트 입력 구조화 출력은 싱글 제안 계획에서 확정(기본 모델 `gemini-3.8-flash`, 환경변수 `GEMINI_MODEL` 로 교체). 오디오 입력 무드 해석은 4단계에서 확정: 곡 전체 오디오 + 구간 시각 목록을 Gemini 에 1회 호출해 구간별 분위기를 받는다(`mood.py`). 실패는 비치명적(`mood=""`)이고, 결과는 interrupt #1 화면에서 사람이 고칠 수 있으며 `Section.mood` 로 propose 프롬프트에 들어간다 | 텍스트·오디오: 확정 |
 | 구조 분석 모델 | **에너지 곡선 기반 휴리스틱으로 확정, all-in-one 류는 도입하지 않는다.** 실제 곡 2개(`나만의_작은_우주`, `burn it up`)를 사람이 직접 청취해 검증: 브릿지 전후처럼 뚜렷한 전환(실측 에너지 변화 35~54%)은 정확히 잡지만, 벌스↔코러스처럼 미세한 전환(실측 3~20%, 임계값 35% 미달)은 놓친다 — 최근 믹싱의 라우드니스 압축 때문에 벌스·코러스 음량 차가 작아 에너지만으로는 원천적으로 구분이 어려움. 구간 개수·순서 등 큰 구조는 두 곡 다 맞았다. 임계값을 낮추면 일부(놓친 것 중 턱걸이 수준)는 잡히지만 노이즈성 과다 분할과 곡 2개로 튜닝하는 과적합 위험이 있어, **한계를 알고 받아들이기로 결정**했다 — 세부 보정은 4단계 interrupt #1(사람이 구간을 보고 직접 수정)에서 흡수한다 | 확정 (시퀀스 그래프 계획 Task 6, 2026-10-02 실제 곡 청취 검증) |
 | 승인본 상한 5개, 승인 후 체크포인트 삭제 24시간, 초안 방치 삭제 7일 | §5·§6.4 값 | 4단계 전 조정 가능 |
 | 호스팅 | 콜드 스타트 없는 플랜 우선 검토(기획서 §9) | 5단계 |

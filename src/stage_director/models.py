@@ -7,11 +7,21 @@ Next.js 가 응답을 그대로 넘겨도 되도록 모르는 필드는 무시
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from pydantic.alias_generators import to_camel
 
 from contracts.stage_state import HEX_COLOR
 from stage_director.sequence import SequenceItem
+
+SECTION_MOOD_MAX = 200  # 무드는 프롬프트에 들어가는 사용자 입력이라 길이를 막는다
+MAX_FEEDBACK_CHARS = 500
 
 
 def _hex_color(value: str) -> str:
@@ -55,6 +65,7 @@ class Section(CamelModel):
     label: str
     start_sec: float = Field(ge=0)
     end_sec: float
+    mood: str = Field(default="", max_length=SECTION_MOOD_MAX)  # 무드 해석 노드 또는 사람이 채운다. 비어 있어도 된다
 
     @model_validator(mode="after")
     def _start_before_end(self):
@@ -69,6 +80,8 @@ class ProposeRequest(CamelModel):
     presets: list[Preset] = Field(default_factory=list)
     analysis: Any = None  # audio_tracks.analysis jsonb. parse_analysis 가 필드별로 방어한다
     section: Section
+    feedback: str | None = Field(default=None, max_length=MAX_FEEDBACK_CHARS)  # interrupt #2 에서 사람이 쓴 수정 요청
+    previous: SequenceItem | None = None  # 피드백이 가리키는 직전 제안
 
 
 class SequenceRequest(CamelModel):
@@ -79,6 +92,7 @@ class SequenceRequest(CamelModel):
     presets: list[Preset] = Field(default_factory=list)
     analysis: Any = None
     duration_sec: float = Field(gt=0)
+    audio_url: str | None = None  # 무드 해석용 음원 서명 URL (스펙 §3). 없으면 무드 노드를 건너뛴다
 
 
 class Issue(CamelModel):
@@ -93,8 +107,47 @@ class SectionProposal(CamelModel):
     issues: list[Issue]
 
 
-class SequenceResponse(CamelModel):
+class RunCreate(CamelModel):
+    """POST /runs 본문. thread_id 는 Next.js 가 만든 stage_sequences.id (스펙 §6.2)."""
+
+    thread_id: str = Field(min_length=1, max_length=64)
+    context: SequenceRequest
+
+
+class RunStatus(CamelModel):
+    """GET/POST /runs 응답. interrupt·result 는 이미 camelCase 로 직렬화된 dict 이다."""
+
     thread_id: str
-    sections: list[Section]
-    items: list[SequenceItem]
-    issues: list[Issue]
+    status: Literal["running", "waiting_input", "done", "error"]
+    interrupt: dict[str, Any] | None = None  # waiting_input 일 때 현재 interrupt 페이로드
+    result: dict[str, Any] | None = None  # done 일 때 {sections, items, issues}
+    error: str | None = None  # error 일 때 코드 문자열(llm_failed / internal_error / interrupted)
+
+
+class SectionsPayload(CamelModel):
+    sections: list[Section] = Field(min_length=1)
+
+
+class FeedbackPayload(CamelModel):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_FEEDBACK_CHARS)]
+    targets: list[Annotated[int, Field(ge=0)]] = Field(min_length=1)  # 사용자가 고른 재생성 대상 구간 idx
+
+
+class SectionsResume(CamelModel):
+    interrupt_id: str
+    kind: Literal["sections"]
+    payload: SectionsPayload
+
+
+class FeedbackResume(CamelModel):
+    interrupt_id: str
+    kind: Literal["feedback"]
+    payload: FeedbackPayload
+
+
+class ApproveResume(CamelModel):
+    interrupt_id: str
+    kind: Literal["approve"]
+
+
+ResumeRequest = Annotated[SectionsResume | FeedbackResume | ApproveResume, Field(discriminator="kind")]

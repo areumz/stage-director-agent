@@ -7,10 +7,12 @@ label 도 내용 인식이 아니라 상대적 에너지 수준에서 따온 이
 """
 
 from stage_director.models import Section
+from stage_director.sequence import TOLERANCE_SEC
 
 MIN_SECTION_SEC = 8.0  # 이보다 짧은 구간은 만들지 않는다. 실제 곡 스파이크에서 조정
 JUMP_WINDOW_SEC = 4  # 경계 후보 좌우로 비교하는 창 크기(초)
 BOUNDARY_JUMP_THRESHOLD = 0.35  # 좌우 평균 에너지 차(곡 평균 대비 비율)가 이보다 크면 경계 후보
+MAX_LABEL_CHARS = 40  # 라벨은 프롬프트와 화면에 들어가는 사용자 입력이라 길이를 막는다
 MAX_SECTIONS = 12  # 노이즈로 구간이 과도하게 쪼개져 LLM 호출이 폭증하는 것을 막는 상한
 
 
@@ -81,3 +83,24 @@ def detect_sections(energy_curve: list[float], duration_sec: float) -> list[Sect
         ratio = (sum(inside) / len(inside)) / track_mean if inside and track_mean > 0 else 1.0
         sections.append(Section(label=_label_for(i, last_idx, ratio), start_sec=start, end_sec=end))
     return sections
+
+
+def validate_section_edit(sections: list[Section], duration_sec: float) -> str | None:
+    """interrupt #1 에서 사람이 고친 구간 목록을 검사한다 (스펙 §6.3: 연속 덮음·최소 길이). 문제가 없으면 None."""
+    if not sections:
+        return "구간이 하나도 없다"
+    if len(sections) > MAX_SECTIONS:
+        return f"구간이 {MAX_SECTIONS}개를 넘는다"
+    if abs(sections[0].start_sec) > TOLERANCE_SEC:
+        return "첫 구간이 0초에서 시작하지 않는다"
+    if abs(sections[-1].end_sec - duration_sec) > TOLERANCE_SEC:
+        return f"마지막 구간이 곡 길이({duration_sec:g}초)에서 끝나지 않는다"
+    for i, s in enumerate(sections):
+        label = s.label.strip()
+        if not label or len(label) > MAX_LABEL_CHARS:
+            return f"{i}번 구간 라벨이 비었거나 {MAX_LABEL_CHARS}자를 넘는다"
+        if i > 0 and abs(sections[i - 1].end_sec - s.start_sec) > TOLERANCE_SEC:
+            return f"{i}번 구간이 이전 구간과 이어지지 않는다"
+        if len(sections) > 1 and s.end_sec - s.start_sec < MIN_SECTION_SEC - TOLERANCE_SEC:
+            return f"{i}번 구간이 최소 길이({MIN_SECTION_SEC:g}초)보다 짧다"
+    return None

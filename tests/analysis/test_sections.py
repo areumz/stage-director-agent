@@ -1,10 +1,14 @@
 import itertools
 
+import pytest
+
 from stage_director.analysis.sections import (
     MAX_SECTIONS,
     MIN_SECTION_SEC,
     detect_sections,
+    validate_section_edit,
 )
+from stage_director.models import Section
 
 
 def flat(duration: int, value: float = 0.5) -> list[float]:
@@ -101,3 +105,37 @@ def test_negative_duration_does_not_throw():
     assert sections[0].start_sec == 0
     # 음수 duration도 처리 가능하도록 안전하게 보정됨
     assert sections[0].end_sec > 0
+
+
+# ── validate_section_edit (interrupt #1 resume 검증) ──────────
+
+
+def secs(*edges: float) -> list[Section]:
+    return [Section(label=f"s{i}", start_sec=a, end_sec=b) for i, (a, b) in enumerate(itertools.pairwise(edges))]
+
+
+def test_valid_edit_passes():
+    assert validate_section_edit(secs(0, 20, 40, 60), 60) is None
+
+
+def test_single_section_shorter_than_the_minimum_is_allowed():
+    assert validate_section_edit(secs(0, 5), 5) is None  # 짧은 곡은 구간 하나가 곡 전체다
+
+
+@pytest.mark.parametrize(
+    "sections, duration",
+    [
+        ([], 60),
+        ([Section(label="a", start_sec=0, end_sec=20), Section(label="b", start_sec=25, end_sec=60)], 60),  # 빈틈
+        ([Section(label="a", start_sec=0, end_sec=30), Section(label="b", start_sec=20, end_sec=60)], 60),  # 겹침
+        (secs(5, 30, 60), 60),  # 0초에서 시작하지 않는다
+        (secs(0, 30, 50), 60),  # 곡 끝까지 덮지 않는다
+        (secs(0, 5, 60), 60),  # 5초짜리 구간은 최소 길이 미만
+        (secs(*[15 * i for i in range(14)]), 195),  # 13개 > MAX_SECTIONS
+        ([Section(label="  ", start_sec=0, end_sec=60)], 60),  # 빈 라벨
+        ([Section(label="x" * 41, start_sec=0, end_sec=60)], 60),  # 라벨이 너무 길다
+    ],
+)
+def test_invalid_edits_are_described(sections, duration):
+    reason = validate_section_edit(sections, duration)
+    assert isinstance(reason, str) and reason

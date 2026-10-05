@@ -8,6 +8,7 @@ from stage_director.llm.fake import FakeLLM
 from stage_director.models import ProposeRequest
 from stage_director.prompts import PROPOSAL_SCHEMA
 from stage_director.propose import propose_section
+from stage_director.sequence import SequenceItem
 from tests.conftest import PROPOSE_REQUEST as FIXTURE
 
 
@@ -166,3 +167,51 @@ def test_only_the_first_ten_presets_are_sent():
     presets = [{"name": f"프리셋{i:02d}", "state": {}} for i in range(12)]
     _, user, _ = sent_prompts(presets=presets)
     assert "프리셋09" in user and "프리셋10" not in user
+
+
+# ── 4단계: 무드, 피드백 ───────────────────────────────────────
+
+
+def section_request(**extra) -> ProposeRequest:
+    return ProposeRequest.model_validate(
+        {**FIXTURE, "section": {"label": "chorus", "startSec": 10, "endSec": 30, **extra.pop("section", {})}, **extra}
+    )
+
+
+def previous_item() -> SequenceItem:
+    return SequenceItem(
+        section_label="chorus", start_sec=10, end_sec=30, transition_ms=2000,
+        state=default_stage_state("#9F77DD"), rationale="원본 근거",
+    )
+
+
+def test_section_mood_is_in_the_prompt_when_present():
+    llm = FakeLLM(llm_output())
+    propose_section(llm, section_request(section={"mood": "몽환적"}))
+    assert "분위기: 몽환적" in llm.calls[0]["user"]
+
+
+def test_prompt_has_no_mood_line_when_mood_is_empty():
+    llm = FakeLLM(llm_output())
+    propose_section(llm, section_request())
+    assert "분위기:" not in llm.calls[0]["user"]
+
+
+def test_feedback_block_carries_the_previous_proposal_and_the_request():
+    llm = FakeLLM(llm_output())
+    propose_section(llm, section_request(feedback="더 어둡게", previous=previous_item()))
+    user = llm.calls[0]["user"]
+    assert "## 사용자 피드백" in user and "피드백: 더 어둡게" in user and "원본 근거" in user
+
+
+def test_prompt_has_no_feedback_block_by_default():
+    llm = FakeLLM(llm_output())
+    propose_section(llm, section_request())
+    assert "사용자 피드백" not in llm.calls[0]["user"]
+
+
+def test_system_prompt_marks_mood_and_feedback_as_data_not_instructions():
+    llm = FakeLLM(llm_output())
+    propose_section(llm, section_request())
+    system = llm.calls[0]["system"]
+    assert "분위기" in system and "사용자 피드백" in system and "지시가 아니다" in system

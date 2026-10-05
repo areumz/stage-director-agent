@@ -6,11 +6,13 @@
 import uuid
 
 import pytest
+from langgraph.types import Command
 
 from stage_director.checkpointer import postgres_checkpointer
 from stage_director.graph import build_sequence_graph
 from stage_director.llm.fake import FakeLLM
 from stage_director.models import Artist, SequenceRequest, Shader, Track
+from tests.graph_helpers import drive
 
 pytestmark = pytest.mark.postgres
 
@@ -40,15 +42,15 @@ def test_checkpoint_can_be_reloaded_after_a_new_connection():
     config = {"configurable": {"thread_id": thread_id}}
 
     with postgres_checkpointer(DATABASE_URL) as saver:
-        graph = build_sequence_graph(FakeLLM(GOOD), checkpointer=saver)
-        result = graph.invoke({"request": request()}, config=config)
+        graph = build_sequence_graph(FakeLLM(GOOD), saver)
+        values = drive(graph, {"request": request()}, config)
 
     # 프로세스를 새로 띄운 것처럼 새 PostgresSaver 로 같은 thread_id 를 읽는다
     with postgres_checkpointer(DATABASE_URL) as saver2:
-        graph2 = build_sequence_graph(FakeLLM(), checkpointer=saver2)
+        graph2 = build_sequence_graph(FakeLLM(), saver2)
         state = graph2.get_state(config)
 
-    assert state.values["final_items"] == result["final_items"]
+    assert state.values["final_items"] == values["final_items"]
 
 
 def test_setup_is_idempotent():
@@ -56,3 +58,19 @@ def test_setup_is_idempotent():
         pass
     with postgres_checkpointer(DATABASE_URL):  # 두 번째도 에러 없이 열려야 한다
         pass
+
+
+def test_pending_interrupt_survives_a_new_connection_and_can_be_resumed():
+    config = {"configurable": {"thread_id": str(uuid.uuid4())}}
+
+    with postgres_checkpointer(DATABASE_URL) as saver:
+        first = build_sequence_graph(FakeLLM(), saver).invoke({"request": request()}, config)
+    pending = first["__interrupt__"][0].value
+    assert pending["kind"] == "confirm_sections"
+
+    # 프로세스를 새로 띄운 것처럼 새 연결·새 그래프로 같은 thread_id 를 이어 받는다
+    with postgres_checkpointer(DATABASE_URL) as saver2:
+        graph2 = build_sequence_graph(FakeLLM(GOOD), saver2)
+        assert graph2.get_state(config).tasks[0].interrupts[0].value == pending
+        second = graph2.invoke(Command(resume={"sections": pending["sections"]}), config)
+    assert second["__interrupt__"][0].value["kind"] == "review"
