@@ -203,3 +203,76 @@ def test_fetch_wraps_network_errors_and_still_closes():
     with pytest.raises(AudioError, match="ConnectionResetError"):
         fetch_with(conn)
     assert conn.closed
+
+
+# ── 진짜 소켓 (전체 시간 상한은 가짜 시계로는 검증되지 않는다) ─────────
+
+
+def _drip_server(payload: bytes, interval: float = 0.1):
+    """접속하면 payload 를 1바이트씩 interval 초마다 보내는 서버. (포트, 종료 함수)"""
+    import threading
+    import time
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    stop = threading.Event()
+
+    def serve():
+        server.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                client, _ = server.accept()
+            except OSError:
+                continue
+            with client:
+                try:
+                    client.recv(4096)
+                    for i in range(len(payload)):
+                        if stop.is_set():
+                            break
+                        client.sendall(payload[i : i + 1])
+                        time.sleep(interval)
+                except OSError:
+                    pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+
+    def close():
+        stop.set()
+        thread.join(3)
+        server.close()
+        assert not thread.is_alive()
+
+    return server.getsockname()[1], close
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n" + b"x" * 1000,  # 본문을 천천히
+        b"HTTP/1.1 200 OK\r\nX-Slow: " + b"y" * 1000,  # 헤더를 천천히
+    ],
+    ids=["body-drip", "header-drip"],
+)
+def test_fetch_enforces_the_total_deadline_on_a_real_socket(monkeypatch, payload):
+    import http.client
+    import time
+
+    monkeypatch.setattr("stage_director.audio.AUDIO_TOTAL_TIMEOUT_SEC", 0.5)
+    monkeypatch.setattr("stage_director.audio.AUDIO_TIMEOUT_SEC", 0.5)  # 조각 하나는 0.1초 안에 오므로 소켓 시간 초과는 안 걸린다
+    port, close = _drip_server(payload)
+    started = time.monotonic()
+    try:
+        with pytest.raises(AudioError, match="오래"):
+            fetch_audio(URL, allowed_hosts=ALLOWED, connect=lambda h, p, t: http.client.HTTPConnection("127.0.0.1", port, timeout=t))
+        assert time.monotonic() - started < 2
+    finally:
+        close()
+
+
+@pytest.mark.parametrize("url", ["https://a b.example.com/", "https://a\x01b.example.com/"])
+def test_invalid_host_characters_surface_as_audio_error_with_the_real_connect(url):
+    with pytest.raises(AudioError):
+        fetch_audio(url)

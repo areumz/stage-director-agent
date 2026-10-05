@@ -9,6 +9,7 @@ URL 이 섞여 들어올 수 있다고 가정한다.
 import http.client
 import ipaddress
 import socket
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -97,8 +98,23 @@ def fetch_audio(
     """(바이트, mime) 을 돌려준다. connect 는 테스트에서 가짜 연결을 넣는 자리."""
     host, port, path = check_url(url, allowed_hosts)
     deadline = time.monotonic() + AUDIO_TOTAL_TIMEOUT_SEC
-    conn = connect(host, port, AUDIO_TIMEOUT_SEC)
+    conn = None
+    timed_out = threading.Event()
+
+    def abort() -> None:  # 읽기는 소켓에서 막혀 있으므로 시계 검사만으로는 못 깨운다. 소켓을 닫아 깨운다
+        timed_out.set()
+        sock = getattr(conn, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    watchdog = threading.Timer(AUDIO_TOTAL_TIMEOUT_SEC, abort)
+    watchdog.daemon = True
     try:
+        conn = connect(host, port, AUDIO_TIMEOUT_SEC)  # 호스트 이름이 이상하면 여기서 InvalidURL
+        watchdog.start()
         conn.request("GET", path, headers={"User-Agent": "stage-director-agent"})
         response = conn.getresponse()
         if response.status != 200:
@@ -115,9 +131,15 @@ def fetch_audio(
             if time.monotonic() > deadline:
                 raise AudioError("내려받기가 너무 오래 걸린다")
             chunks.append(chunk)
+        if timed_out.is_set():  # 소켓이 닫혀 본문이 짧게 끝난 경우
+            raise AudioError("내려받기가 너무 오래 걸린다")
     except (OSError, ValueError, http.client.HTTPException) as e:
+        if timed_out.is_set():
+            raise AudioError("내려받기가 너무 오래 걸린다") from e
         raise AudioError(f"{type(e).__name__}: {e}") from e
     finally:
-        conn.close()
+        watchdog.cancel()
+        if conn is not None:
+            conn.close()
     mime = content_type.split(";")[0].strip().lower()
     return b"".join(chunks), mime if mime.startswith("audio/") else DEFAULT_MIME
