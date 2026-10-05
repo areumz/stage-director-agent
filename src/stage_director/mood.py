@@ -3,10 +3,17 @@
 — 무드가 비어 있어도 연출 제안은 돌고, interrupt #1 화면에서 사람이 채울 수 있음.
 """
 
+import logging
+import time
+
 from stage_director.llm.client import LLMClient, LLMError
 from stage_director.models import Section, Track
 
+log = logging.getLogger(__name__)
+
 MOOD_OUTPUT_MAX = 100
+MOOD_MAX_RETRIES = 2  # 최초 시도 + 2회. 일시적 혼잡(503)에 곡 전체의 무드가 비지 않게 한다
+MOOD_RETRY_DELAY_SEC = 2.0  # 재시도마다 2초, 4초로 늘려 가며 기다린다
 
 SYSTEM_PROMPT = """너는 음악 분위기 해석가다. 입력 오디오를 듣고, 사용자가 알려준 구간 시각마다 분위기를 한국어 짧은 구
 (예: "잔잔하고 몽환적", "벅차오르는 클라이맥스")로 쓴다.
@@ -37,12 +44,18 @@ def _user_prompt(sections: list[Section], track: Track) -> str:
 
 def interpret_moods(llm: LLMClient, audio: bytes, mime_type: str, sections: list[Section], track: Track) -> list[str]:
     """항상 len(sections) 개의 문자열을 돌려줌. 어떤 실패에도 예외를 던지지 않음(빈 문자열로 채움)."""
-    try:
-        raw = llm.generate_json_with_audio(
-            system=SYSTEM_PROMPT, user=_user_prompt(sections, track), schema=MOOD_SCHEMA, audio=audio, mime_type=mime_type
-        )
-    except LLMError:
-        return [""] * len(sections)
+    for attempt in range(MOOD_MAX_RETRIES + 1):
+        try:
+            raw = llm.generate_json_with_audio(
+                system=SYSTEM_PROMPT, user=_user_prompt(sections, track), schema=MOOD_SCHEMA, audio=audio, mime_type=mime_type
+            )
+            break
+        except LLMError as e:
+            log.warning("무드 해석 실패 (%d/%d): %s", attempt + 1, MOOD_MAX_RETRIES + 1, e)
+            if attempt < MOOD_MAX_RETRIES:
+                time.sleep(MOOD_RETRY_DELAY_SEC * (attempt + 1))
+    else:
+        return [""] * len(sections)  # 모든 시도가 실패: 무드 없이 진행(비치명적)
     moods = raw.get("moods") if isinstance(raw, dict) else None
     moods = moods if isinstance(moods, list) else []
     return [moods[i].strip()[:MOOD_OUTPUT_MAX] if i < len(moods) and isinstance(moods[i], str) else "" for i in range(len(sections))]

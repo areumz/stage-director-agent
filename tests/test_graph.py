@@ -183,14 +183,16 @@ def test_mood_is_interpreted_before_the_pause():
     assert llm.calls[0]["audio_bytes"] == 5
 
 
-def test_mood_failure_does_not_block_the_run():
+def test_mood_failure_does_not_block_the_run(caplog):
     def broken(url):
         raise AudioError("down")
 
     llm = FakeLLM()
-    _, _, result = start(llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=broken)
+    with caplog.at_level("WARNING", logger="stage_director.graph_nodes"):
+        _, _, result = start(llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=broken)
     assert [s["mood"] for s in result["__interrupt__"][0].value["sections"]] == ["", ""]
     assert llm.calls == []
+    assert "down" in caplog.text  # 음원을 못 받은 이유도 로그로 남는다
 
 
 def test_user_edited_mood_reaches_the_propose_prompt():

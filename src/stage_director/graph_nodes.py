@@ -1,5 +1,6 @@
 """시퀀스 그래프의 노드와 라우팅 함수. 기존 propose_section/run_gate/validate_sequence 를 그대로 조합"""
 
+import logging
 from collections.abc import Callable
 
 from langchain_core.runnables import RunnableConfig
@@ -16,6 +17,8 @@ from stage_director.models import Issue, ProposeRequest, Section
 from stage_director.mood import interpret_moods
 from stage_director.propose import propose_section
 from stage_director.sequence import validate_sequence
+
+log = logging.getLogger(__name__)
 
 MAX_SECTION_REGEN = 2  # 스펙 §7: 위반 구간은 최대 2회 자동 재생성
 
@@ -46,7 +49,8 @@ def make_mood_node(llm: LLMClient, fetch: Callable[[str], tuple[bytes, str]] = f
             return {}
         try:
             audio, mime_type = fetch(req.audio_url)
-        except AudioError:
+        except AudioError as e:
+            log.warning("음원을 받지 못해 무드 해석을 건너뛴다: %s", e)
             return {}
         moods = interpret_moods(llm, audio, mime_type, state["sections"], req.track)
         return {"sections": [s.model_copy(update={"mood": m}) for s, m in zip(state["sections"], moods)]}
