@@ -244,6 +244,21 @@ def test_a_job_failed_while_queued_never_runs():
     assert runner.status("t1").error == "interrupted" and llm.calls == []
 
 
+def test_a_failing_queued_to_running_gate_is_logged_and_nothing_runs(caplog):
+    class GateBlip(InMemoryJobStore):
+        def transition(self, job_id, *, from_, to, **kw):
+            if to == "running":
+                raise RuntimeError("db blip")
+            return super().transition(job_id, from_=from_, to=to, **kw)
+
+    jobs, llm = GateBlip(), FakeLLM()
+    runner = Runner(build_sequence_graph(llm, InMemorySaver()), jobs, InlineExecutor())
+    with caplog.at_level("ERROR"):
+        runner.start("t1", CONTEXT)  # 예외가 밖으로 새면 이 줄에서 테스트가 실패한다
+    assert jobs.get("t1").status == "queued" and llm.calls == []
+    assert any(r.levelname == "ERROR" for r in caplog.records)  # log.exception 이 남긴다
+
+
 def test_analysis_job_ids_are_unknown_threads():
     runner, jobs, _ = make()
     jobs.create("a1", kind="analysis")

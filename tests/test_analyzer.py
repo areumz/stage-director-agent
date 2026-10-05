@@ -85,6 +85,21 @@ def test_a_job_failed_while_queued_never_runs():
     assert rec.fetch_calls == [] and runner.status("a1").status == "error"
 
 
+def test_a_failing_queued_to_running_gate_is_logged_and_nothing_runs(caplog):
+    class GateBlip(InMemoryJobStore):
+        def transition(self, job_id, *, from_, to, **kw):
+            if to == "running":
+                raise RuntimeError("db blip")
+            return super().transition(job_id, from_=from_, to=to, **kw)
+
+    jobs, rec = GateBlip(), Recorder()
+    runner = AnalysisRunner(jobs, InlineExecutor(), fetch=rec.fetch, build=rec.build, allowed_hosts=("supabase.co",))
+    with caplog.at_level("ERROR"):
+        runner.start("a1", URL)
+    assert jobs.get("a1").status == "queued" and rec.fetch_calls == []
+    assert any(r.levelname == "ERROR" for r in caplog.records)  # log.exception 이 남긴다
+
+
 def test_invalid_urls_are_rejected_before_anything_is_queued():
     runner, jobs, rec = make()
     with pytest.raises(RunError) as e:

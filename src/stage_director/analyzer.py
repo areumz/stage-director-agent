@@ -104,7 +104,12 @@ class AnalysisRunner:
         return job
 
     def _run(self, job_id: str, audio_url: str) -> None:
-        if not self._jobs.transition(job_id, from_={"queued"}, to="running"):
+        try:
+            started = self._jobs.transition(job_id, from_={"queued"}, to="running")
+        except Exception:  # 버려지는 Future 안에서 조용히 사라지지 않게 남긴다. 작업은 queued 로 남고 다음 서비스 시작 때 정리된다
+            log.exception("analysis %s: queued -> running 전이 실패", job_id)
+            return
+        if not started:
             return  # 대기하는 사이 다른 인스턴스의 시작 정리(fail_running)가 error 로 바꿨거나 행이 지워졌다. 실행하지 않는다
         # ponytail: 진행률은 단계(내려받기 전 0.1, 후 0.4, 측정 후 1.0)만 알린다. librosa 는 중간 진행을 알려 주지 않는다.
         try:

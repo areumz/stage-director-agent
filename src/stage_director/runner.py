@@ -103,7 +103,12 @@ class Runner:
         self._executor.submit(self._run, thread_id, graph_input)
 
     def _run(self, thread_id: str, graph_input: Any) -> None:
-        if not self._jobs.transition(thread_id, from_={"queued"}, to="running"):
+        try:
+            started = self._jobs.transition(thread_id, from_={"queued"}, to="running")
+        except Exception:  # 버려지는 Future 안에서 조용히 사라지지 않게 남긴다. 작업은 queued 로 남고 다음 서비스 시작 때 정리된다
+            log.exception("run %s: queued -> running 전이 실패", thread_id)
+            return
+        if not started:
             return  # 대기하는 사이 다른 인스턴스의 시작 정리(fail_running)가 error 로 바꿨거나 행이 지워졌다. 실행하지 않는다
         # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구.
         try:
