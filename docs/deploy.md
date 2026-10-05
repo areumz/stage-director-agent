@@ -86,20 +86,20 @@ gcloud run deploy stage-director-agent \
   --port 8080 --allow-unauthenticated \
   --set-env-vars GEMINI_MODEL=gemini-3.8-flash,GEMINI_FALLBACK_MODEL=gemini-3.6-flash,GEMINI_RPM=10,AUDIO_URL_ALLOWED_HOSTS=htmfbhgjxgxbhuujfvwm.supabase.co \
   --set-secrets INTERNAL_API_KEY=INTERNAL_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,DATABASE_URL=DATABASE_URL:latest \
-  --startup-probe httpGet.path=/healthz,httpGet.port=8080,periodSeconds=5,failureThreshold=12 \
-  --liveness-probe httpGet.path=/healthz,httpGet.port=8080,periodSeconds=30
+  --startup-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=5,failureThreshold=12 \
+  --liveness-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=30
 ```
 
 - `--allow-unauthenticated` 인 이유: Next.js(Vercel)가 인터넷으로 부르므로 Cloud Run IAM 인증을 쓰지 않고, 앱이 `X-Internal-Key` 로 인증한다.
-- 상태 확인은 `/healthz`(프로세스가 요청을 받는지만 본다). `/readyz`(DB 확인)는 사람·모니터링용이다. DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다.
-- `--startup-probe`·`--liveness-probe` 문법은 gcloud 버전에 따라 다를 수 있다. 오류가 나면 `gcloud run deploy --help` 로 확인하고, 배포 뒤 `gcloud run services describe stage-director-agent --region asia-southeast1` 의 출력에 두 probe 가 `/healthz` 로 들어갔는지 본다.
+- 상태 확인은 `/health`(프로세스가 요청을 받는지만 본다). `/ready`(DB 확인)는 사람·모니터링용이다. DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다.
+- `--startup-probe`·`--liveness-probe` 문법은 gcloud 버전에 따라 다를 수 있다. 오류가 나면 `gcloud run deploy --help` 로 확인하고, 배포 뒤 `gcloud run services describe stage-director-agent --region asia-southeast1` 의 출력에 두 probe 가 `/health` 로 들어갔는지 본다.
 
 ### 6. 확인
 
 ```bash
 URL=$(gcloud run services describe stage-director-agent --region asia-southeast1 --format='value(status.url)')
-curl -s $URL/healthz
-curl -s $URL/readyz
+curl -s $URL/health
+curl -s $URL/ready
 gcloud run services logs read stage-director-agent --region asia-southeast1 --limit 50   # "Gemini 모델 … (예비 …), 모델당 분당 N회" 한 줄
 ```
 
@@ -135,13 +135,13 @@ gcloud run services update stage-director-agent --region asia-southeast1 --updat
 - 도쿄는 단가가 약 17% 싸지만 무료 한도 안에서는 차이가 없다. Neon 지연이 문제가 아닌 것으로 측정되면 도쿄를 대안으로 검토한다.
 - 서울은 가격이 싱가포르와 같고 Neon 과의 거리만 멀어져 이점이 없다.
 
-배포 뒤에 Neon 왕복 시간을 직접 잰다(Task 9). `/healthz`(DB 안 봄)와 `/readyz`(DB 한 번 왕복)의 응답 시간 차이가 거의 Neon 왕복 + 쿼리 시간이다.
+배포 뒤에 Neon 왕복 시간을 직접 잰다(Task 9). `/health`(DB 안 봄)와 `/ready`(DB 한 번 왕복)의 응답 시간 차이가 거의 Neon 왕복 + 쿼리 시간이다.
 
 ```bash
 URL=$(gcloud run services describe stage-director-agent --region asia-southeast1 --format='value(status.url)')
-curl -s -o /dev/null $URL/readyz        # 인스턴스와 Neon 을 먼저 깨운다(첫 요청은 재지 않는다)
+curl -s -o /dev/null $URL/ready        # 인스턴스와 Neon 을 먼저 깨운다(첫 요청은 재지 않는다)
 for i in 1 2 3 4 5 6 7 8 9 10; do
-  echo "healthz $(curl -s -o /dev/null -w '%{time_total}' $URL/healthz)  readyz $(curl -s -o /dev/null -w '%{time_total}' $URL/readyz)"
+  echo "health $(curl -s -o /dev/null -w '%{time_total}' $URL/health)  ready $(curl -s -o /dev/null -w '%{time_total}' $URL/ready)"
 done
 ```
 

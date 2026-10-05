@@ -107,18 +107,18 @@ def create_app(
         content = {"detail": exc.code, **({"message": exc.message} if exc.message else {})}
         return JSONResponse(status_code=exc.status, content=content)
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    @app.get("/health")
+    def health() -> dict[str, str]:
         # 호스팅의 상태 확인용(키 없이 호출). 프로세스가 요청을 받는지만 본다 — DB 가 느려졌다고 플랫폼이 서비스를 내리면 안 된다
         return {"status": "ok"}
 
-    @app.get("/readyz")
-    def readyz() -> JSONResponse:
+    @app.get("/ready")
+    def ready() -> JSONResponse:
         # 사람·모니터링용. DB 한 번 왕복(없는 id 조회)으로 전용 Postgres 에 닿는지 본다. 내용은 노출하지 않는다
         try:
-            app.state.jobs.get("__readyz__")
+            app.state.jobs.get("__ready__")
         except Exception:
-            log.exception("readyz: DB 확인 실패")
+            log.exception("ready: DB 확인 실패")
             return JSONResponse(status_code=503, content={"status": "db_unavailable"})
         return JSONResponse(content={"status": "ok"})
 

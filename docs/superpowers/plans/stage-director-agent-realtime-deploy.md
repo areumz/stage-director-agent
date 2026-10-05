@@ -23,7 +23,7 @@
 | Task 5: 분석 작업 — `POST /analyze` · `GET /analyze/{jobId}`, 진행률 | §4.1 |
 | Task 6: 보존 정책 확장(완료 행 7일 삭제, 분석 결과 7일 보관, 실행 중 주기 실행) | §6.4 |
 | Task 7: 시드 곡 오프라인 분석 스크립트 | §4.1 5번 |
-| Task 8: 상태 확인(`/healthz`·`/readyz`), Dockerfile(`$PORT`), Cloud Run 배포 가이드(`docs/deploy.md`: GCP 프로젝트·결제·API·Secret Manager·예산 알림·첫 배포·비용), 환경변수·시크릿 | §13, 기획서 §9 |
+| Task 8: 상태 확인(`/health`·`/ready`), Dockerfile(`$PORT`), Cloud Run 배포 가이드(`docs/deploy.md`: GCP 프로젝트·결제·API·Secret Manager·예산 알림·첫 배포·비용), 환경변수·시크릿 | §13, 기획서 §9 |
 | Task 9: 통합 검증, 스펙 갱신(API 계약), 사람 단계(실제 배포·재시작·폴백·한도) | §9, §11 |
 
 **이 계획 밖.** Next.js 라우트(`/api/audio-tracks*`, `/api/sequences*`)와 프론트 진행 상태 UI, on-stage 마이그레이션(`audio_tracks`, 음원 버킷, RLS)과 시드 곡을 DB 에 넣는 스크립트는 on-stage 저장소 몫이다. 이 계획은 on-stage 가 부를 API 계약(아래 표)만 정해 스펙에 반영한다.
@@ -32,7 +32,7 @@
 
 | 항목 | 결정 | 이유 |
 | --- | --- | --- |
-| 호스팅 | **Google Cloud Run**, 리전 `asia-southeast1`(싱가포르), 1vCPU·메모리 2GiB. `--no-cpu-throttling`, `--min-instances 0`(유휴 시 자동 중지), `--max-instances 1`, `$PORT`(기본 8080)로 기동, 시크릿은 Secret Manager(`--set-secrets`), 상태 확인 `/healthz`(시작·생존)·`/readyz`(사람·모니터링용), 배포는 `gcloud run deploy --source .` | 비용 최소화 + GCP 경험. CPU 항상 할당이 아니면 요청 밖에서 도는 그래프·분석 스레드와 heartbeat 가 멈춘다. 최대 1대는 RPM 제한·resume 락이 프로세스 단위이기 때문이고 요금 폭주도 막는다. **리전:** Neon 에 서울 리전이 없어 가장 가까운 곳이 싱가포르이고, Python↔Neon 쿼리가 가장 많아 이 구간을 가깝게 둔다(Vercel·Supabase 는 도쿄. 도쿄는 Tier 1 이라 단가가 약 17% 싸지만 무료 한도 안에서는 차이가 없어 대안으로만 둔다). 요금은 2026-10-05 에 가격 페이지로 확인(서울·싱가포르 Tier 2, 시간당 약 $0.095, 무료 한도 $5.22/월 ≈ 55시간). 기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 의도적으로 접는다 — 평소 첫 요청은 콜드 스타트를 겪고, 필요한 경우에만 `--min-instances 1` 로 올린다(`docs/deploy.md`) |
+| 호스팅 | **Google Cloud Run**, 리전 `asia-southeast1`(싱가포르), 1vCPU·메모리 2GiB. `--no-cpu-throttling`, `--min-instances 0`(유휴 시 자동 중지), `--max-instances 1`, `$PORT`(기본 8080)로 기동, 시크릿은 Secret Manager(`--set-secrets`), 상태 확인 `/health`(시작·생존)·`/ready`(사람·모니터링용), 배포는 `gcloud run deploy --source .` | 비용 최소화 + GCP 경험. CPU 항상 할당이 아니면 요청 밖에서 도는 그래프·분석 스레드와 heartbeat 가 멈춘다. 최대 1대는 RPM 제한·resume 락이 프로세스 단위이기 때문이고 요금 폭주도 막는다. **리전:** Neon 에 서울 리전이 없어 가장 가까운 곳이 싱가포르이고, Python↔Neon 쿼리가 가장 많아 이 구간을 가깝게 둔다(Vercel·Supabase 는 도쿄. 도쿄는 Tier 1 이라 단가가 약 17% 싸지만 무료 한도 안에서는 차이가 없어 대안으로만 둔다). 요금은 2026-10-05 에 가격 페이지로 확인(서울·싱가포르 Tier 2, 시간당 약 $0.095, 무료 한도 $5.22/월 ≈ 55시간). 기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 의도적으로 접는다 — 평소 첫 요청은 콜드 스타트를 겪고, 필요한 경우에만 `--min-instances 1` 로 올린다(`docs/deploy.md`) |
 | 대기열 상태 알림 | `status` 값에 `queued` 를 추가한다(API 계약 변경). on-stage 는 `queued` 를 `running` 과 같은 진행 중으로 처리하고 "대기 중" 문구만 더하면 된다 | 한 곳(`status`)만 보면 되고 보존 규칙도 단순하다 |
 | 죽은 작업 처리 | **heartbeat·별도 워커 없이 시작 시 정리.** 서비스가 시작될 때 `queued`·`running` 으로 남은 작업(그래프·분석)을 `error(interrupted)` 로 바꾼다(4단계의 `fail_running` 을 `queued` 까지 확장). 사용자가 "다시 시도"하면 그래프는 마지막 체크포인트에서, 분석은 처음부터 이어진다 | 인스턴스 1대에서는 이것으로 충분하다. 배포 때 옛 인스턴스가 잠시 살아 있어도 곧 내려가므로 그 작업이 함께 `interrupted` 로 정리되는 것은 어차피 일어날 일을 앞당길 뿐이고, 줄 서 있던 작업은 `queued → running` 전이가 실패해 실행되지 않는다. heartbeat(`owner`·`heartbeat_at` 컬럼, 주기 스레드, 45초 복구 지연)는 인스턴스가 여러 대가 될 때 필요하다 |
 | `GEMINI_RPM` | 모델당 분당 10회로 시작하고 Task 9 에서 실제 계정 한도를 확인해 조정한다 | 실제 한도를 모르는 상태의 보수적 시작값 |
@@ -46,7 +46,7 @@
 | `jobs` 행 보존 | 승인(`done`)된 그래프 작업의 행은 7일 뒤 삭제(체크포인트는 24시간 규칙 그대로), 분석 작업은 마지막 갱신 후 7일 뒤 삭제 | 완료된 행이 영원히 쌓이고 보존 정책이 매번 같은 행을 훑는 문제(4단계 한계 표)를 푼다 |
 | 보존 정책 실행 | 시작 시 + 실행 중 6시간마다(인-프로세스) + 기존 CLI | 오래 떠 있는 인스턴스는 시작 시에만 도는 정책으로는 정리되지 않는다 |
 | 시드 곡 분석 | `python -m stage_director.analysis.seed` 가 곡마다 JSON 을 내보낸다(`seed-analysis/`, gitignore). 업로드 분석과 같은 `build_result` 를 쓴다 | Python 은 Supabase 에 쓰지 않는다(§3). 곡 약관 확인 전이라 결과 파일도 저장소에 올리지 않고 on-stage 에 파일로 넘긴다 |
-| 상태 확인 | `/healthz`(키 없음, DB 안 봄) = Cloud Run 시작·생존 확인용, `/readyz`(키 없음, DB 한 번 왕복) = 사람·모니터링용 | DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다. 두 엔드포인트 모두 내부 정보를 노출하지 않는다 |
+| 상태 확인 | `/health`(키 없음, DB 안 봄) = Cloud Run 시작·생존 확인용, `/ready`(키 없음, DB 한 번 왕복) = 사람·모니터링용 | DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다. 두 엔드포인트 모두 내부 정보를 노출하지 않는다 |
 | 호스팅과 이 설계의 맞물림 | Cloud Run `--no-cpu-throttling` + 최대 1대 + 유휴 시 0대. 0대로 줄었다 켜지면 **시작 시 보존 정책**이 정기 실행 역할을 하고, 유휴 중에는 주기 작업이 돌지 않는다(맡은 작업이 없으니 문제없음). `waiting_input` 작업은 DB 에만 있어 0대가 돼도 안전하다 | CPU 항상 할당이 아니면 요청이 끝난 뒤 그래프·분석 스레드가 멈춘다. 최대 1대는 RPM 제한·resume 락이 프로세스 단위이기 때문이다 |
 
 **실행 전에 on-stage 에서 받을 값.** ① Supabase 프로젝트 호스트(`abc.supabase.co`) — `AUDIO_URL_ALLOWED_HOSTS` 에 넣는다. 이 값이 없으면 **배포하지 않는다**(SSRF 방어가 공인 IP 검사만 남는다). ② 음원 버킷이 파일 크기 30MiB 이하·길이 180초 이하만 받는지 — on-stage 마이그레이션(스펙 §5)에서 맞춘다. (Task 4, 5, 8, 9)
@@ -73,7 +73,7 @@
 
 - Python 서비스는 Supabase 에 접근하지 않는다. 필요한 컨텍스트는 요청 본문으로 받는다 (§3).
 - **`../on-stage`를 열지 않는다** (§12 제약 2). 필요한 모양은 모두 `contracts/`에 있다.
-- Python 엔드포인트는 모두 `X-Internal-Key` 필수 (§4.2). **예외는 `/healthz`·`/readyz` 둘뿐**이며 `{"status": …}` 외에는 아무것도 노출하지 않는다.
+- Python 엔드포인트는 모두 `X-Internal-Key` 필수 (§4.2). **예외는 `/health`·`/ready` 둘뿐**이며 `{"status": …}` 외에는 아무것도 노출하지 않는다.
 - 결정적 로직은 **TDD로 처음부터** 작성한다: 실패하는 테스트 → 실패 확인 → 최소 구현 → 통과 확인 (§12 제약 5).
 - `jobs` 전이는 반드시 조건부 UPDATE 로 한다 (§6.1). 분석 작업도 같은 규칙이다.
 - 보존 정책 (§6.4): 승인된 스레드는 `done` 24시간 후 **체크포인트만**, 승인되지 않은 스레드는 `updated_at` 7일 방치 시 **체크포인트와 jobs 행 모두** 삭제. 이 계획은 여기에 규칙 3(완료 행 7일)·규칙 4(분석 7일)를 **더할 뿐** 앞의 두 규칙은 바꾸지 않는다.
@@ -120,7 +120,7 @@
 
 ## API 계약 변경 (on-stage 가 알아야 할 것)
 
-Task 9 에서 스펙에 반영한다. 모든 엔드포인트는 기존처럼 `X-Internal-Key` 필수(`/healthz`·`/readyz` 제외).
+Task 9 에서 스펙에 반영한다. 모든 엔드포인트는 기존처럼 `X-Internal-Key` 필수(`/health`·`/ready` 제외).
 
 | 변경 | 내용 | on-stage 가 할 일 |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ Task 9 에서 스펙에 반영한다. 모든 엔드포인트는 기존처럼 `X-
 | 분석 작업 id 로 `/runs`, 그래프 id 로 `/analyze` | 서로 404 (`thread_not_found` / `job_not_found`) | 영향 없음 |
 | **`done` 그래프 작업의 `GET /runs/{id}` 는 7일 뒤 404** | 행이 삭제된다(체크포인트는 24시간 뒤) | **`approved` 시퀀스 행에 대해 Python 을 호출하지 않는다.** 404→410→행 삭제 경로는 `draft` 행에만 쓴다 |
 | `context.audioUrl` | https·443·허용 호스트·공인 IP 가 아니면 **요청을 거절하지 않고** 무드 해석만 건너뛴다 | 영향 없음(무드는 비치명적) |
-| `GET /healthz`, `GET /readyz` | 신규. 키 없이 `{"status": …}` | 호출 안 함(호스팅·사람용) |
+| `GET /health`, `GET /ready` | 신규. 키 없이 `{"status": …}` | 호출 안 함(호스팅·사람용) |
 
 ## 파일 구조
 
@@ -146,7 +146,7 @@ Task 9 에서 스펙에 반영한다. 모든 엔드포인트는 기존처럼 `X-
 | `src/stage_director/retention.py`(수정) | 규칙 3·4, `PurgeCounts`, 주기 실행 | 6 |
 | `src/stage_director/analysis/seed.py` | 시드 곡 분석 CLI | 7 |
 | `Dockerfile`, `.dockerignore`, `docs/deploy.md`, `.env.example` | 컨테이너 이미지와 Cloud Run 배포 가이드 | 8 |
-| `src/stage_director/api.py`(수정) | `/healthz`, `/readyz`, 분석 풀·보존 주기 실행 연결 | 3, 4, 5, 6, 8 |
+| `src/stage_director/api.py`(수정) | `/health`, `/ready`, 분석 풀·보존 주기 실행 연결 | 3, 4, 5, 6, 8 |
 | `docs/superpowers/specs/stage-director-agent-design.md`(수정) | §4.1, §4.2, §6.1, §6.4, §8, §13 | 9 |
 | `tests/` | 각 파일의 테스트(`test_background.py`, `test_ratelimit.py`, `test_settings.py`, `test_analyzer.py`, `analysis/test_seed.py` 신규) | 1~8 |
 
@@ -554,22 +554,22 @@ git commit -m "feat: export seed-track analysis as JSON files with the same code
 
 **Interfaces:**
 - Consumes: Task 3·4·5 의 환경변수(`GEMINI_RPM`, `AUDIO_URL_ALLOWED_HOSTS`)와 `create_app` 팩토리
-- Produces: `GET /healthz`(키 없음, DB 안 봄) → `{"status": "ok"}`, `GET /readyz`(키 없음) → 200 `{"status": "ok"}` / 503 `{"status": "db_unavailable"}`(오류 내용 노출 없음), `app.state.jobs`, 컨테이너 이미지(워커 1개, `$PORT`(기본 8080)로 기동), `docs/deploy.md`(Cloud Run 조건 표·환경변수와 Secret Manager·GCP 프로젝트 생성·결제 연결·API 활성화·월 $5 예산 알림·시크릿 등록·`gcloud run deploy --source .`·**배포 후 오래된 이미지 정리 한 줄**·설정/시크릿 교체·**리전 비교(싱가포르/서울/도쿄)와 Neon 왕복 시간 재는 방법**·**확인된 요금과 월 사용량 시나리오**·콜드 스타트·`--min-instances 1` 올리고 되돌리기·새 리비전 때 일어나는 일·음원 15MiB/30MiB·로그에서 볼 것)
+- Produces: `GET /health`(키 없음, DB 안 봄) → `{"status": "ok"}`, `GET /ready`(키 없음) → 200 `{"status": "ok"}` / 503 `{"status": "db_unavailable"}`(오류 내용 노출 없음), `app.state.jobs`, 컨테이너 이미지(워커 1개, `$PORT`(기본 8080)로 기동), `docs/deploy.md`(Cloud Run 조건 표·환경변수와 Secret Manager·GCP 프로젝트 생성·결제 연결·API 활성화·월 $5 예산 알림·시크릿 등록·`gcloud run deploy --source .`·**배포 후 오래된 이미지 정리 한 줄**·설정/시크릿 교체·**리전 비교(싱가포르/서울/도쿄)와 Neon 왕복 시간 재는 방법**·**확인된 요금과 월 사용량 시나리오**·콜드 스타트·`--min-instances 1` 올리고 되돌리기·새 리비전 때 일어나는 일·음원 15MiB/30MiB·로그에서 볼 것)
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
-`tests/test_api.py`: `/healthz` 는 키 없이 200 이고 다른 정보를 노출하지 않음, `/readyz` 는 저장소가 답하면 200, **DB 가 죽어도 503 이고 오류 문구(호스트 이름 등)를 노출하지 않음**
+`tests/test_api.py`: `/health` 는 키 없이 200 이고 다른 정보를 노출하지 않음, `/ready` 는 저장소가 답하면 200, **DB 가 죽어도 503 이고 오류 문구(호스트 이름 등)를 노출하지 않음**
 
 _(코드 본문 생략 — 상세본 Task 8 Step 1 참고)_
 
 - [ ] **Step 2: 실패하는 것을 확인한다**
 
 Run: `uv run pytest tests/test_api.py -q`
-Expected: FAIL — `test_healthz_needs_no_key_and_reveals_nothing_else` (`404 != 200`)
+Expected: FAIL — `test_health_needs_no_key_and_reveals_nothing_else` (`404 != 200`)
 
 - [ ] **Step 3: 구현한다 — 상태 확인 엔드포인트**
 
-`api.py`: `app.state.jobs` 저장, `/healthz`, `/readyz`
+`api.py`: `app.state.jobs` 저장, `/health`, `/ready`
 
 _(코드 본문 생략 — 상세본 Task 8 Step 3 참고)_
 
@@ -597,8 +597,8 @@ docker run --rm -d --name sda -p 8080:8080 \
   -e DATABASE_URL=postgresql://stage_director:stage_director@host.docker.internal:5433/stage_director_checkpoints \
   stage-director-agent
 sleep 5
-curl -s localhost:8080/healthz                              # {"status":"ok"}
-curl -s localhost:8080/readyz                               # {"status":"ok"}
+curl -s localhost:8080/health                              # {"status":"ok"}
+curl -s localhost:8080/ready                               # {"status":"ok"}
 curl -s -o /dev/null -w "%{http_code}\n" localhost:8080/runs/x   # 401 (키 없음)
 curl -s -H "X-Internal-Key: local-key" localhost:8080/analyze/x   # {"detail":"job_not_found"}
 docker run --rm --entrypoint sh stage-director-agent -c 'ls -a /app'   # .env·tests·demo-tracks·docs 가 없어야 한다
@@ -611,11 +611,11 @@ docker run --rm -d --name sda2 -p 9000:9000 -e PORT=9000 \
   -e DATABASE_URL=postgresql://stage_director:stage_director@host.docker.internal:5433/stage_director_checkpoints \
   stage-director-agent
 sleep 5
-curl -s localhost:9000/healthz                              # {"status":"ok"}
+curl -s localhost:9000/health                              # {"status":"ok"}
 docker stop sda2; docker compose down
 ```
 
-Expected: 위 주석의 응답(`PORT=9000` 으로 띄운 컨테이너도 9000 에서 `/healthz` 응답), 시드 분석 명령은 `burn it up.mp3: 173.819초, BPM 99.38, 구간 4개 → /tmp/out/burn it up.json`.
+Expected: 위 주석의 응답(`PORT=9000` 으로 띄운 컨테이너도 9000 에서 `/health` 응답), 시드 분석 명령은 `burn it up.mp3: 173.819초, BPM 99.38, 구간 4개 → /tmp/out/burn it up.json`.
 
 마지막 명령이 `decode_failed` 이면 슬림 이미지에 mp3 디코더가 없는 것이다. `Dockerfile` 의 `FROM` 바로 아래에 다음을 넣고 다시 빌드한다:
 
@@ -712,24 +712,24 @@ git commit -m "docs: record the analysis, queued and retention contract in the s
 
 ```bash
 URL=$(gcloud run services describe stage-director-agent --region asia-southeast1 --format='value(status.url)')
-time curl -s $URL/healthz        # 첫 요청이면 콜드 스타트 시간이 된다. 기록해 둔다
-curl -s $URL/readyz
+time curl -s $URL/health        # 첫 요청이면 콜드 스타트 시간이 된다. 기록해 둔다
+curl -s $URL/ready
 gcloud run services logs read stage-director-agent --region asia-southeast1 --limit 50   # "Gemini 모델 … (예비 …), 모델당 분당 N회" 한 줄
 ```
 
 확인할 것(결과는 PR 설명에 적는다):
 
-1. `/healthz`·`/readyz` 가 `{"status":"ok"}`, 키 없이 `/runs/x` 는 401. `gcloud run services describe` 출력에 startup·liveness probe 가 `/healthz` 로 들어가 있다
+1. `/health`·`/ready` 가 `{"status":"ok"}`, 키 없이 `/runs/x` 는 401. `gcloud run services describe` 출력에 startup·liveness probe 가 `/health` 로 들어가 있다
 2. Neon 의 `jobs` 테이블에 `kind`·`progress` 컬럼이 생겼고 4단계에서 만든 기존 행이 그대로 있다
 3. **실제 Supabase 서명 URL** 로 `POST /analyze` → 폴링에서 `queued`/`running` → `done`, `result.analysis` 와 `fileHash` 확인. 허용 호스트가 아닌 URL 은 422
 4. **분석 도중 새 리비전 배포(또는 인스턴스 종료)**: 분석을 시작한 직후 새 리비전을 만든다(`gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars REVISION_BUMP=$(date +%s)`) → 새 인스턴스가 켜진 뒤 첫 조회에서 `error`/`interrupted`(옛 인스턴스가 내려가고 새 인스턴스가 뜨는 데 걸리는 시간 만큼 `running` 으로 보일 수 있다) → 같은 `jobId` 로 `POST /analyze` 하면 처음부터 다시 `done`
 5. **그래프 도중 새 리비전 배포**: `POST /runs` 로 `propose` 가 도는 중에 같은 방법으로 새 리비전을 만든다 → `interrupted` → 다시 `POST /runs` 가 **이미 끝난 구간의 LLM 호출을 반복하지 않고** 이어진다(로그의 호출 수로 확인)
 6. **대기열**: 분석 두 건을 연달아 보내면 두 번째가 `queued`(풀 1건)였다가 첫 건이 끝나면 `running`
-7. **유휴 후 0대로 줄고 첫 요청에 깨어남**: 요청 없이 15분쯤 두면 Cloud Run 콘솔 Metrics 의 Container instance count 가 0 으로 내려간다. 그 뒤 `time curl -s $URL/healthz` 로 **콜드 스타트 시간**을 재서 PR 설명과 `docs/deploy.md` 의 "비용과 콜드 스타트" 에 기록한다. 발표 당일 쓸 `--min-instances 1` 올리기·되돌리기 명령도 한 번 실행해 본다
+7. **유휴 후 0대로 줄고 첫 요청에 깨어남**: 요청 없이 15분쯤 두면 Cloud Run 콘솔 Metrics 의 Container instance count 가 0 으로 내려간다. 그 뒤 `time curl -s $URL/health` 로 **콜드 스타트 시간**을 재서 PR 설명과 `docs/deploy.md` 의 "비용과 콜드 스타트" 에 기록한다. 발표 당일 쓸 `--min-instances 1` 올리기·되돌리기 명령도 한 번 실행해 본다
 8. **메모리 부족 종료가 없다**: 분석(4번)과 재시작 중의 로그에서 `gcloud run services logs read stage-director-agent --region asia-southeast1 --limit 200 | grep -iE "memory limit|exceeded"` 가 아무것도 내지 않고, 콘솔의 Memory utilization 이 한계에 붙지 않는다. 나오면 `--memory 4Gi` 로 올린다
 9. `curl -s -o /dev/null -w "%{http_code}\n" $URL/` 이 404 이고 응답이 내부 정보를 노출하지 않는다
 10. 예산 알림이 만들어졌는지(`gcloud billing budgets list --billing-account=BILLING_ACCOUNT_ID`)와 서비스가 `--max-instances 1` 인지(`gcloud run services describe` 의 `autoscaling.knative.dev/maxScale`) 확인한다
-11. **Neon 왕복 시간을 잰다**: `docs/deploy.md` "리전 선택" 의 반복 명령(`/healthz` 와 `/readyz` 를 번갈아 10번)을 돌려 두 응답 시간의 차이를 기록한다. 이 차이가 대략 Neon 왕복 + 쿼리 한 번이다. 몇 십 ms 이하면 싱가포르 선택이 맞다. 0.3초를 넘으면 원인(Neon 이 잠들어 있었는지, 다른 리전에 배포했는지)을 확인하고, 그래도 크면 PR 설명에 적어 도쿄(Tier 1, Vercel·Supabase 와 같은 도시) 배포를 재검토할 근거로 남긴다
+11. **Neon 왕복 시간을 잰다**: `docs/deploy.md` "리전 선택" 의 반복 명령(`/health` 와 `/ready` 를 번갈아 10번)을 돌려 두 응답 시간의 차이를 기록한다. 이 차이가 대략 Neon 왕복 + 쿼리 한 번이다. 몇 십 ms 이하면 싱가포르 선택이 맞다. 0.3초를 넘으면 원인(Neon 이 잠들어 있었는지, 다른 리전에 배포했는지)을 확인하고, 그래도 크면 PR 설명에 적어 도쿄(Tier 1, Vercel·Supabase 와 같은 도시) 배포를 재검토할 근거로 남긴다
 12. 배포를 두세 번 한 뒤 `docs/deploy.md` 의 "오래된 이미지 정리" 를 한 번 실행해 Artifact Registry 에 현재 리비전 이미지만 남는지 본다
 
 - [ ] **Step 8: (사람이 하는 단계) on-stage 에 넘길 것**
@@ -779,7 +779,7 @@ PR 설명에 다음을 적고 on-stage 담당에게 전한다. 이 저장소는 
 | 유휴 시 0대라 평소 첫 요청이 콜드 스타트를 겪는다(이미지가 크고 librosa 를 불러온다). 기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 접었다 | 발표·면접 당일 `--min-instances 1`, 끝나면 0 으로 되돌린다(`docs/deploy.md`). 되돌리지 않으면 하루 약 $2.4 |
 | 요청이 없을 때 Cloud Run 이 인스턴스를 회수하면 돌던 작업이 사라진다. 폴링 요청이 있는 동안에는 유지되지만 탭을 닫으면 보장되지 않는다 | 다음에 인스턴스가 켜질 때 `interrupted` 로 정리되고 다시 시도하면 이어진다. 잦으면 `--min-instances 1` 을 검토 |
 | Cloud Run 요금은 2026-10-05 에 가격 페이지로 확인했다(무료 한도 $5.22/월 ≈ 55시간, 시간당 약 $0.095). **월 사용량(접속 한 번에 인스턴스가 켜져 있는 시간 약 25분)은 가정**이고, Cloud Build·Artifact Registry·Secret Manager·외부 네트워크 요금은 확인하지 못했다 | 배포 전에 가격 페이지를 다시 보고, 별도 요금 항목은 각 가격 페이지에서 확인 |
-| Python↔Neon 왕복이 작업 지연에 얼마나 영향을 주는지는 추정(쿼리당 같은 도시 1~2ms, 도쿄↔싱가포르 약 70ms)이다 | Task 9 에서 `/healthz` 와 `/readyz` 응답 시간 차이로 실측 |
+| Python↔Neon 왕복이 작업 지연에 얼마나 영향을 주는지는 추정(쿼리당 같은 도시 1~2ms, 도쿄↔싱가포르 약 70ms)이다 | Task 9 에서 `/health` 와 `/ready` 응답 시간 차이로 실측 |
 | 분석 진행률은 4단계(0.1/0.4/1.0)뿐이다 | librosa 가 중간 진행을 주지 않는다 |
 | 주 모델이 장시간 죽으면 모든 호출이 먼저 주 모델을 시도한다(지연 + 한도 소모). 회로 차단기는 없다 | 필요하면 `GEMINI_MODEL` 을 예비 모델 값으로 바꿔 재배포 |
 | `/propose` 는 동기 요청이다 | 배포 환경에서 Next.js 는 부르지 않는다 |
