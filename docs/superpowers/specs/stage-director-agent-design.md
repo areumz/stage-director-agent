@@ -182,7 +182,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 **규칙 1. 승인된 스레드: 승인 24시간 후 체크포인트만 삭제**
 
-- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 4단계에서는 `jobs` 의 모든 행이 그래프 작업이다).
+- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 이 규칙은 그래프 작업(`kind=graph`)에만 적용된다).
 - 기준 시각: `jobs.status`가 `done`이 된 시각(= 사용자가 승인해 최종 시퀀스가 나온 시점). Python은 Supabase의 `approved_at`을 볼 수 없으므로 이 시각을 쓴다.
 - 삭제 범위: LangGraph 체크포인트(실행 기록)만 `adelete_thread`로 지운다. 승인본은 이미 `stage_sequences.items`에 있고 이후 조회는 그 행을 읽으므로 체크포인트는 필요 없다.
 - 24시간을 두는 이유: 승인 직후 Next.js가 최종 시퀀스를 저장하다 실패해도 같은 스레드에서 결과를 다시 받아 저장할 수 있게 하는 여유 시간이다.

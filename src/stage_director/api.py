@@ -124,7 +124,7 @@ def create_app(
 
     @app.post("/propose", dependencies=[Depends(require_internal_key)])
     def propose(req: ProposeRequest) -> SectionProposal:
-        # ponytail: 동기 요청. 최악은 MAX_RETRIES+1 = 3회 x TIMEOUT_MS 60초 = 약 3분. 필요하면 /runs 처럼 작업+폴링으로
+        # ponytail: 동기 요청. 최악은 3회 x (주 모델 60초 + 대체 모델 60초) = 약 6분. 필요하면 /runs 처럼 작업+폴링으로
         try:
             return propose_section(llm, req)
         except LLMError:
