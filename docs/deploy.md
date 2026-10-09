@@ -29,6 +29,10 @@ Python 서비스(FastAPI + LangGraph + librosa) 한 대를 Cloud Run 에 올린�
 
 시크릿은 이미지·저장소에 넣지 않고 `--set-secrets` 로만 넣는다. `.env` 는 `.dockerignore` 로 이미지에서 빠진다.
 
+**개발용 DB 와 운영용 DB 는 반드시 분리한다.** 예를 들어 Neon 에서 운영용 브랜치와 개발용 브랜치를 따로 만들고, 로컬 `.env` 의 `DATABASE_URL` 은 개발용 브랜치만 가리키게 한다. 서버는 시작할 때마다 `jobs` 의 `queued`·`running` 작업을 전부 `interrupted` 로 바꾸고 오래된 행을 정리(`retention`)한다. 로컬 서버를 운영 DB 에 연결해 켜면 운영에서 실제로 돌던 작업이 전부 중단 처리되고 오래된 초안이 지워진다.
+
+`INTERNAL_API_KEY` 는 추측할 수 없는 값으로 만든다: `openssl rand -hex 32` (64자리 16진수). 한 번 출력된 값을 아래 시크릿 등록 단계에 붙여 넣고, Next.js 쪽 환경변수에도 같은 값을 넣는다. 짧거나 예측 가능한 값을 쓰지 않는다.
+
 ## 처음 배포
 
 아래 `PROJECT_ID`·`BILLING_ACCOUNT_ID`(형식 `XXXXXX-XXXXXX-XXXXXX`)는 본인 값으로 바꾼다. 음원 호스트는 이 프로젝트의 Supabase 호스트 `htmfbhgjxgxbhuujfvwm.supabase.co` 로 채워 두었다.
@@ -59,13 +63,25 @@ gcloud billing budgets create --billing-account=BILLING_ACCOUNT_ID \
 
 예산 알림은 **메일로 알려 줄 뿐 요금을 막지 않는다.** 요금 폭주를 실제로 막는 것은 `--max-instances 1` 이다.
 
+**콘솔에서 만들기(gcloud 대신).** 화면 문구는 바뀔 수 있다.
+
+1. Google Cloud 콘솔 → **결제(Billing)** → 결제 계정 선택 → **예산 및 알림(Budgets & alerts)** → **예산 만들기**
+2. 이름: `stage-director-agent 월 5달러`. 범위(Scope): 이 프로젝트만 선택한다.
+3. 금액: **지정 금액(Specified amount)** 으로 `$5`.
+4. 알림 기준(Actions)에 50% 와 100% 를 추가하고, 이메일 알림이 켜져 있는지 확인한 뒤 저장한다.
+
+결제 계정 관리자 권한이 없으면 예산을 만들 수 없다. 만든 뒤 메일 주소가 맞는지 한 번 확인한다.
+
 ### 4. 시크릿 등록 (Secret Manager)
 
 ```bash
 for NAME in INTERNAL_API_KEY GEMINI_API_KEY DATABASE_URL; do
-  read -rs -p "$NAME: " VALUE; echo
+  printf '%s: ' "$NAME"; read -rs VALUE; echo
   printf %s "$VALUE" | gcloud secrets create "$NAME" --data-file=-
 done
+
+# (bash 와 zsh 모두에서 동작한다. `read -rs -p "프롬프트"` 형태는 bash 전용이라 macOS 기본 셸 zsh 에서는 -p 의 의미가 달라 실패한다)
+# 입력할 때 값이 화면에 보이지 않는 것이 정상이다. INTERNAL_API_KEY 는 위에서 만든 `openssl rand -hex 32` 값을 붙여 넣는다.
 
 # Cloud Run 이 쓰는 서비스 계정(기본: Compute 기본 계정)에 읽기 권한을 준다
 PROJECT_NUMBER=$(gcloud projects describe PROJECT_ID --format='value(projectNumber)')
@@ -90,6 +106,15 @@ gcloud run deploy stage-director-agent \
   --liveness-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=30
 ```
 
+- **첫 `--source` 배포에서 권한 오류가 나면:** Cloud Run 공식 문서([소스에서 배포](https://docs.cloud.google.com/run/docs/deploying-source-code), 2026-10-09 확인)에 따르면 Cloud Build 가 기본적으로 Compute 기본 서비스 계정을 써서 소스를 빌드하며, 이 계정에 **Cloud Run Builder(`roles/run.builder`)** 역할이 필요하다. 부여 후 반영에 몇 분 걸린다.
+
+  ```bash
+  gcloud projects add-iam-policy-binding PROJECT_ID \
+    --member=serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com \
+    --role=roles/run.builder
+  ```
+
+  `PROJECT_NUMBER` 는 위 4단계의 `gcloud projects describe` 로 구한 값이다. 일부 안내나 오류 메시지에는 `roles/cloudbuild.builds.builder` 가 나오지만 이 공식 문서에는 없다 — **확인 필요**: 오류 메시지가 다른 역할을 지목하면 그 역할을 같은 서비스 계정에 부여한다. 배포하는 계정이 프로젝트 소유자(Owner)가 아니면 `roles/run.sourceDeveloper`, `roles/serviceusage.serviceUsageConsumer`, 서비스 ID 에 대한 `roles/iam.serviceAccountUser` 도 필요하다고 문서에 적혀 있다.
 - `--allow-unauthenticated` 인 이유: Next.js(Vercel)가 인터넷으로 부르므로 Cloud Run IAM 인증을 쓰지 않고, 앱이 `X-Internal-Key` 로 인증한다.
 - 상태 확인은 `/health`(프로세스가 요청을 받는지만 본다). `/ready`(DB 확인)는 사람·모니터링용이다. DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다.
 - `--startup-probe`·`--liveness-probe` 문법은 gcloud 버전에 따라 다를 수 있다. 오류가 나면 `gcloud run deploy --help` 로 확인하고, 배포 뒤 `gcloud run services describe stage-director-agent --region asia-southeast1` 의 출력에 두 probe 가 `/health` 로 들어갔는지 본다.
@@ -170,6 +195,19 @@ done
 월 약 130회 접속(하루 4~5회)을 넘어야 무료 한도를 넘기 시작한다. `--max-instances 1` 이라 트래픽이 몰려도 시간당 요금은 약 $0.095 를 넘지 않는다.
 
 이 페이지에 없는 비용(Cloud Build, Artifact Registry 저장, Secret Manager, 외부로 나가는 네트워크)은 별도 가격 페이지에서 확인한다. 포트폴리오 규모에서는 센트 단위로 예상하지만 이번에 확인하지 못했다. Gemini API 와 Neon 은 Cloud Run 과 별도 요금이다.
+
+**공개 URL 은 봇이 깨울 수 있다.** 서비스 주소는 인터넷에 열려 있어(`--allow-unauthenticated`) 스캐너나 봇이 아무 경로나 계속 두드릴 수 있다. `INTERNAL_API_KEY` 가 없는 요청은 앱이 401 로 거절하지만, 요청이 컨테이너에 도달하는 순간 인스턴스는 켜지고 켜져 있는 시간은 과금된다. 봇 요청이 끊기지 않으면 인스턴스가 하루 종일 켜져 있어 **최악의 경우 월 약 $69**(730시간 × 약 $0.095)까지 나올 수 있다. `--max-instances 1` 이 시간당 요금의 상한이고, 월 상한은 아니다.
+
+- 예산 알림 메일($2.5=50%, $5=100%)이 오면 미루지 말고 바로 확인한다: Cloud Run 콘솔의 인스턴스 수·요청 로그에서 이상한 경로로 오는 요청이 많은지 본다.
+- 임시 차단(응급 브레이크): 공개 접근을 끄면 IAM 에서 거절된 요청은 컨테이너에 도달하지 않아 과금되지 않는다(가격 페이지: "requests denied by IAM policy are not billed"). 명령 문법은 사용 전에 `gcloud run services remove-iam-policy-binding --help` 로 확인한다.
+
+  ```bash
+  gcloud run services remove-iam-policy-binding stage-director-agent --region asia-southeast1 \
+    --member=allUsers --role=roles/run.invoker
+  ```
+
+  다시 열 때는 `add-iam-policy-binding` 으로 같은 `--member`·`--role` 을 준다(Next.js 가 호출할 수 있어야 하므로 평소에는 열어 둔다).
+- `INTERNAL_API_KEY` 는 `openssl rand -hex 32` 로 만든 값을 쓰고, 노출됐다고 의심되면 "설정 바꾸기"의 방법으로 교체한다.
 
 **발표·면접 당일에는 콜드 스타트를 없앤다.** 시작 몇 시간 전에 올리고, 끝나면 반드시 되돌린다.
 
