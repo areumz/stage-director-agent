@@ -1,7 +1,8 @@
-"""분석 작업 (스펙 §4.1): 음원 내려받기 → librosa 측정 → jobs.result. 그래프 실행과 별도의 스레드 풀에서 돈다.
+"""분석 작업 (스펙 §4.1): 음원 내려받기 → librosa 측정 → jobs.result. 그래프 실행과 별도의 스레드 풀
 
-jobs 행의 kind 는 analysis, id 는 Next.js 가 정한 jobId(audio_tracks.id). 결과는 done 후 7일 보관(retention.py)되어
-탭을 닫아도 다음 폴링 때 Next.js 가 받아 audio_tracks.analysis 에 저장한다.
+jobs 행의 kind 는 analysis, id 는 Next.js 가 정한 jobId(audio_tracks.id).
+결과는 done 후 7일 보관(retention.py)되어,
+탭을 닫아도 다음 폴링 때 Next.js 가 받아 audio_tracks.analysis 에 저장
 """
 
 import hashlib
@@ -21,7 +22,7 @@ from stage_director.runner import RunError
 
 log = logging.getLogger(__name__)
 
-MAX_CONCURRENT_ANALYSES = 1  # librosa 한 건이 수백 MB 를 쓴다. 풀이 비어 있지 않으면 다음 분석은 queued 로 기다린다
+MAX_CONCURRENT_ANALYSES = 1  # librosa 한 건이 수백 MB 를 쓴다. 풀이 비어 있지 않으면 다음 분석은 queued 로 대기
 MAX_ANALYSIS_AUDIO_BYTES = 30 * 1024 * 1024  # 3분 wav(44.1kHz 스테레오 16bit)가 약 31MB. 음원 버킷의 크기 상한도 이 값 이하로 맞춘다
 MAX_DURATION_SEC = 180  # 스펙 §5 audio_tracks.duration_sec 최대
 DURATION_TOLERANCE_SEC = 1.0  # 인코더 패딩 때문에 180.02초 같은 곡이 나온다

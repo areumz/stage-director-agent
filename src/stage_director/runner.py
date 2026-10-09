@@ -109,7 +109,7 @@ class Runner:
             log.exception("run %s: queued -> running 전이 실패", thread_id)
             return
         if not started:
-            return  # 대기하는 사이 다른 인스턴스의 시작 정리(fail_running)가 error 로 바꿨거나 행이 지워졌다. 실행하지 않는다
+            return  # 대기하는 사이 다른 인스턴스의 시작 정리(fail_running)가 error 로 바꿨거나 행이 지워짐 -> 실행하지 않는다
         # ponytail: error 전이 자체가 실패하면 작업은 running 으로 남고, 다음 서비스 시작 때 error(interrupted) 로 복구.
         try:
             result = self._graph.invoke(graph_input, self._config(thread_id))

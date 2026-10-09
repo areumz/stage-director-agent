@@ -109,7 +109,7 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        # 호스팅의 상태 확인용(키 없이 호출). 프로세스가 요청을 받는지만 본다 — DB 가 느려졌다고 플랫폼이 서비스를 내리면 안 된다
+        # 호스팅의 상태 확인용(키 없이 호출). 프로세스가 요청을 받는지만 봄
         return {"status": "ok"}
 
     @app.get("/ready")

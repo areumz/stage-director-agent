@@ -34,7 +34,7 @@ def _is_public(address: str) -> bool:
 
 
 def check_url(url: str, allowed_hosts: tuple[str, ...] = ()) -> tuple[str, int, str]:
-    """(host, port, path+query). 받을 수 없는 URL 이면 AudioError. DNS 는 풀지 않는다(요청을 받는 순간의 빠른 검사)."""
+    """(host, port, path+query). 받을 수 없는 URL 이면 AudioError. DNS 는 풀지 x"""
     try:
         parts = urlsplit(url)
         port = parts.port
@@ -101,7 +101,9 @@ def fetch_audio(
     conn = None
     timed_out = threading.Event()
 
-    def abort() -> None:  # 읽기는 소켓에서 막혀 있으므로 시계 검사만으로는 못 깨운다. 소켓을 닫아 깨운다
+    def abort() -> None:
+        # response.read()가 데이터가 올 때까지 기다리는 중이면 시간 검사 코드까지 도달하지 못할 수 있음
+        # 그 경우 소켓을 강제로 끊어 read()를 끝낸다.
         timed_out.set()
         sock = getattr(conn, "sock", None)
         if sock is not None:

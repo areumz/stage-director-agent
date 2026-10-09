@@ -11,10 +11,10 @@ from typing import Any, Protocol
 
 from psycopg.types.json import Jsonb
 
-ACTIVE = frozenset({"queued", "running"})  # 이 프로세스의 스레드가 일하고 있어야 하는 상태. 프로세스가 죽으면 이 상태로 남는다
+ACTIVE = frozenset({"queued", "running"})  # 이 프로세스의 스레드가 일하고 있어야 하는 상태. 프로세스가 죽으면 이 상태로 남음
 
-_DDL_LOCK = 7_240_501  # pg_advisory_xact_lock 키. 인스턴스 둘이 동시에 기동해도 DDL 이 겹치지 않게 한다
-# 컬럼을 더할 때는 맨 아래에 ADD COLUMN IF NOT EXISTS 한 줄을 추가한다. 새 DB 도 기존 DB 도 같은 경로를 탄다.
+_DDL_LOCK = 7_240_501  # pg_advisory_xact_lock 키. 인스턴스 둘이 동시에 기동해도 DDL 이 겹치지 않게 함
+# 컬럼을 더할 때는 맨 아래에 ADD COLUMN IF NOT EXISTS 한 줄을 추가. (새 DB 도 기존 DB 도 같은 경로)
 _DDL = (
     """CREATE TABLE IF NOT EXISTS jobs (
         id         text PRIMARY KEY,

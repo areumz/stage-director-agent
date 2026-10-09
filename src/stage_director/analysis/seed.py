@@ -1,7 +1,7 @@
-"""시드 곡 오프라인 분석 (스펙 §4.1 5번). 음원 파일마다 JSON 한 개를 만든다.
+"""시드 곡 오프라인 분석. 음원 파일마다 JSON 한 개.
 
 Python 은 Supabase 를 읽고 쓰지 않으므로 결과를 파일로 내보내고, on-stage 의 시드 스크립트가 audio_tracks 행
-(analysis, file_hash, duration_sec)에 넣는다. 업로드 곡의 분석 작업과 같은 build_result 를 써서 결과의 모양이 같다.
+(analysis, file_hash, duration_sec)에 넣음. 업로드 곡의 분석 작업과 같은 build_result 를 써서 결과의 모양이 같음.
 
 사용: uv run python -m stage_director.analysis.seed demo-tracks/*.mp3 --out seed-analysis
 """

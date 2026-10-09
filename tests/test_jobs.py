@@ -1,4 +1,4 @@
-"""JobStore 계약 테스트. 메모리 구현은 항상, Postgres 구현은 -m postgres 로만 돈다.
+"""JobStore 계약 테스트. 메모리 구현은 항상, Postgres 구현은 -m postgres 일때만 실행.
 
 실행: docker compose up -d checkpointer-db && uv run pytest tests/test_jobs.py -m postgres -q
 """
