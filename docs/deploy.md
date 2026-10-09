@@ -24,7 +24,7 @@ Python 서비스(FastAPI + LangGraph + librosa) 한 대를 Cloud Run 에 올린�
 | `GEMINI_API_KEY` | **Secret Manager** | Gemini API 키 |
 | `DATABASE_URL` | **Secret Manager** | Neon 연결 문자열(`sslmode=require` 포함) |
 | `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | 일반 | `--set-env-vars` |
-| `GEMINI_RPM` | 일반 | 모델당 분당 요청 수. 실제 계정 한도에 맞춘다 |
+| `GEMINI_RPM` | 일반 | 모델당 분당 요청 수. **4 로 둔다** — 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값이다. 유료 키로 바꾸면 실제 한도에 맞춰 올린다 |
 | `AUDIO_URL_ALLOWED_HOSTS` | 일반 | Supabase 프로젝트 호스트. 비워 두고 배포하지 않는다 |
 
 시크릿은 이미지·저장소에 넣지 않고 `--set-secrets` 로만 넣는다. `.env` 는 `.dockerignore` 로 이미지에서 빠진다.
@@ -35,7 +35,7 @@ Python 서비스(FastAPI + LangGraph + librosa) 한 대를 Cloud Run 에 올린�
 
 ## 처음 배포
 
-아래 `PROJECT_ID`·`BILLING_ACCOUNT_ID`(형식 `XXXXXX-XXXXXX-XXXXXX`)는 본인 값으로 바꾼다. 음원 호스트는 이 프로젝트의 Supabase 호스트 `htmfbhgjxgxbhuujfvwm.supabase.co` 로 채워 두었다.
+아래 `PROJECT_ID`·`BILLING_ACCOUNT_ID`(형식 `XXXXXX-XXXXXX-XXXXXX`)는 실제 값으로 바꾼다. 음원 호스트는 이 프로젝트의 Supabase 호스트 `htmfbhgjxgxbhuujfvwm.supabase.co` 로 채워 두었다.
 
 ### 1. GCP 프로젝트와 결제
 
@@ -100,7 +100,7 @@ gcloud run deploy stage-director-agent \
   --cpu 1 --memory 2Gi --no-cpu-throttling \
   --min-instances 0 --max-instances 1 \
   --port 8080 --allow-unauthenticated \
-  --set-env-vars GEMINI_MODEL=gemini-3.8-flash,GEMINI_FALLBACK_MODEL=gemini-3.6-flash,GEMINI_RPM=10,AUDIO_URL_ALLOWED_HOSTS=htmfbhgjxgxbhuujfvwm.supabase.co \
+  --set-env-vars GEMINI_MODEL=gemini-3.8-flash,GEMINI_FALLBACK_MODEL=gemini-3.6-flash,GEMINI_RPM=4,AUDIO_URL_ALLOWED_HOSTS=htmfbhgjxgxbhuujfvwm.supabase.co \
   --set-secrets INTERNAL_API_KEY=INTERNAL_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,DATABASE_URL=DATABASE_URL:latest \
   --startup-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=5,failureThreshold=12 \
   --liveness-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=30
@@ -187,9 +187,9 @@ done
 | 시나리오 | 인스턴스 시간 | 요금(무료 한도 차감 전) | 실제 청구 |
 | --- | --- | --- | --- |
 | 평소 가볍게(월 20회 접속) | 약 8시간 | $0.79 | $0 |
-| 면접 준비·지인 공유(월 60회) | 약 25시간 | $2.38 | $0 |
+| 링크 공유(월 60회) | 약 25시간 | $2.38 | $0 |
 | 링크가 퍼진 경우(월 150회) | 약 62시간 | $5.94 | 약 $0.7 |
-| 발표·면접 당일 `--min-instances 1` 8시간 | 8시간 | $0.76 | 무료 한도에 합산 |
+| 필요시 `--min-instances 1` 8시간 | 8시간 | $0.76 | 무료 한도에 합산 |
 | `--min-instances 1` 을 한 달 방치 | 730시간 | $69 | 약 $64 |
 
 월 약 130회 접속(하루 4~5회)을 넘어야 무료 한도를 넘기 시작한다. `--max-instances 1` 이라 트래픽이 몰려도 시간당 요금은 약 $0.095 를 넘지 않는다.
@@ -209,7 +209,7 @@ done
   다시 열 때는 `add-iam-policy-binding` 으로 같은 `--member`·`--role` 을 준다(Next.js 가 호출할 수 있어야 하므로 평소에는 열어 둔다).
 - `INTERNAL_API_KEY` 는 `openssl rand -hex 32` 로 만든 값을 쓰고, 노출됐다고 의심되면 "설정 바꾸기"의 방법으로 교체한다.
 
-**발표·면접 당일에는 콜드 스타트를 없앤다.** 시작 몇 시간 전에 올리고, 끝나면 반드시 되돌린다.
+**필요한 중요 시점에는 콜드 스타트를 없앤다.** 시작 몇 시간 전에 올리고, 끝나면 반드시 되돌린다.
 
 ```bash
 gcloud run services update stage-director-agent --region asia-southeast1 --min-instances 1   # 켜 두기 (8시간 기준 약 $0.76)
@@ -228,7 +228,9 @@ gcloud run services update stage-director-agent --region asia-southeast1 --min-i
 
 ## 음원 크기와 무드 해석
 
-15MiB 를 넘는 음원은 무드 해석(Gemini 인라인 한도)을 건너뛰고 분석(30MiB 까지)만 한다. 3분 mp3 는 3~6MB 라 보통 해당하지 않는다.
+15MiB 를 넘는 음원은 무드 해석(Gemini 인라인 한도)을 건너뛰고 분석(30MiB 까지)만 한다. 5분 mp3 는 3~12MB 라 보통 해당하지 않는다.
+
+분석 길이 한도는 300초다. 메모리는 2GiB 로 충분하다: 로컬(macOS)에서 실제 분석 함수로 잰 최고치는 300초 스테레오 mp3 약 0.7GiB, 300초 모노 wav 약 0.8GiB(서비스 로드 직후 약 0.1GiB 포함)였다. Cloud Run(Linux)에서는 다를 수 있으니 배포 후 확인 8번(메모리 로그)으로 다시 본다.
 
 ## 로그에서 볼 것
 

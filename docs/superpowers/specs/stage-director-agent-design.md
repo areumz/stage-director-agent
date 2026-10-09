@@ -62,7 +62,7 @@ Python이 요청으로 받는 컨텍스트: 분석 JSON, 곡 메타(제목·장�
 1. 업로드 후 Next.js가 `audio_tracks` 행 생성(`analysis_status=pending`). `file_hash`가 같은 본인 곡에 분석 결과가 있으면 재사용하고 끝.
 2. Next.js → Python `POST /analyze {jobId, audioUrl}` → 202 `{jobId, status, progress, result?, error?}`. `jobId` 는 `audio_tracks.id` 이고 `audioUrl` 은 음원 서명 URL 이다. 멱등: 같은 `jobId` 로 다시 부르면 현재 상태를 돌려주고, `error` 일 때만 처음부터 다시 분석한다. `audioUrl` 이 https·443 포트·허용 호스트(Supabase 프로젝트)·공인 IP 조건을 못 지키면 큐에 넣지 않고 422 `{detail:"invalid_audio_url"}`.
 3. 프론트가 `GET /api/audio-tracks/{id}`를 폴링. Next.js가 Python `GET /analyze/{jobId}`를 조회해 `queued / running / done / error`와 `progress`(0~1, 내려받기 전 0.1 · 후 0.4 · 완료 1.0 의 단계 단위)를 전달한다. `queued` 는 분석 풀(동시 1건)이 차서 순서를 기다리는 중이다. 모르는 작업(그래프 작업 id 포함)은 404 `{detail:"job_not_found"}`.
-4. `done`이면 `result` 는 `{analysis, fileHash}`(`analysis` 는 §5 `audio_tracks.analysis` 모양, `fileHash` 는 내려받은 바이트의 sha256). Next.js가 `analysis`를 저장(멱등)하고 `analysis_status=done`. 탭을 닫아도 결과는 Python `jobs`에 마지막 갱신 후 7일 보관되어 다음 폴링 때 저장된다. `error` 의 코드: `audio_unavailable`(내려받기 실패·차단) · `decode_failed`(오디오로 읽을 수 없음) · `too_long`(180초 + 1초 초과) · `internal_error` · `interrupted`(처리 중 서버가 재시작됨, 같은 `jobId` 로 `POST /analyze` 를 다시 부르면 처음부터 재시도). 음원 파일 크기는 30MiB 까지 받는다 — 음원 버킷의 크기 상한도 이 값 이하로 맞춘다. 지원하는 업로드 형식은 mp3·wav·flac·ogg 이다. m4a·aac 는 libsndfile 에 AAC 가 없어 디코딩할 수 없고 `decode_failed` 로 끝나므로, 음원 버킷은 이 MIME 타입만 허용하고 30MiB·180초 상한을 둔다.
+4. `done`이면 `result` 는 `{analysis, fileHash}`(`analysis` 는 §5 `audio_tracks.analysis` 모양, `fileHash` 는 내려받은 바이트의 sha256). Next.js가 `analysis`를 저장(멱등)하고 `analysis_status=done`. 탭을 닫아도 결과는 Python `jobs`에 마지막 갱신 후 7일 보관되어 다음 폴링 때 저장된다. `error` 의 코드: `audio_unavailable`(내려받기 실패·차단) · `decode_failed`(오디오로 읽을 수 없음) · `too_long`(300초 + 1초 초과) · `internal_error` · `interrupted`(처리 중 서버가 재시작됨, 같은 `jobId` 로 `POST /analyze` 를 다시 부르면 처음부터 재시도). 음원 파일 크기는 30MiB 까지 받는다 — 음원 버킷의 크기 상한도 이 값 이하로 맞춘다. 지원하는 업로드 형식은 mp3·wav·flac·ogg 이다. m4a·aac 는 libsndfile 에 AAC 가 없어 디코딩할 수 없고 `decode_failed` 로 끝나므로, 음원 버킷은 이 MIME 타입만 허용하고 30MiB·300초 상한을 둔다.
 5. 시드 곡은 오프라인 스크립트(`python -m stage_director.analysis.seed`)로 미리 분석해 이 경로를 건너뛴다. 스크립트는 곡마다 `{fileName, fileHash, durationSec, analysis}` JSON 을 내보내고(Python 은 Supabase 에 쓰지 않는다), on-stage 시드 스크립트가 이 값을 `audio_tracks` 의 `file_hash`·`duration_sec`·`analysis` 로 넣는다. 결과의 모양은 업로드 분석과 같은 코드가 만든다. 분석은 이미 `audio_tracks.analysis`에 있으므로 무거운 분석 작업(librosa·구조 모델)은 돌지 않고, 그래프는 Next.js가 채워주는 컨텍스트만으로 시작한다.
 
 ### 4.2 시퀀스 생성 작업
@@ -104,7 +104,7 @@ DDL은 on-stage 마이그레이션에 들어간다(§11). 이 저장소는 계�
 | title, genre text, mood_keywords text[] | 곡 메타 |
 | storage_path text | 음원 버킷 경로 |
 | file_hash text | sha256. 분석 캐시 키 |
-| duration_sec numeric | 최대 180 |
+| duration_sec numeric | 최대 300 |
 | analysis jsonb null, analysis_status text | `pending / running / done / error` |
 | created_at | |
 
@@ -136,7 +136,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 - 첫 항목 `startSec = 0`, 마지막 `endSec = duration_sec`, `items[i].endSec == items[i+1].startSec` (빈틈·겹침 없음 → 재생 시 `currentTime`으로 구간 조회가 단순해짐)
 - `0 <= transitionMs <= (endSec - startSec) * 1000`
 
-**음원 Storage 버킷** 신설: audio MIME 허용 목록과 3분 곡 기준 크기 상한. 업로드는 `/api/gallery/upload-url`의 서명 URL 패턴을 복제한다.
+**음원 Storage 버킷** 신설: audio MIME 허용 목록(mp3·wav·flac·ogg)과 크기 상한 30MiB(5분 mp3 가 들어가는 값). 업로드는 `/api/gallery/upload-url`의 서명 URL 패턴을 복제한다.
 
 ## 6. 체크포인터와 그래프 상태
 
@@ -228,7 +228,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | Python 서비스 다운 | Next.js가 502. 시드 곡의 캐시된 예시 시퀀스로 폴백(기획서 §11, Next.js 측 구현) |
 | 분석 실패 | `analysis_status=error`, 사용자에게 재시도 또는 에너지 곡선 기반 경계 제안 모드 안내(1단계 스파이크 결과에 따라 확정) |
 | Python 프로세스가 작업 도중 죽음(배포·재시작 포함) | 새 인스턴스가 켜질 때 `queued`·`running` 작업이 `error(interrupted)`. 다시 시도하면 그래프는 마지막 체크포인트에서, 분석은 처음부터 이어진다(§6.1) |
-| Gemini 분당 한도 | Python 이 모델마다 슬라이딩 윈도우(`GEMINI_RPM`, 기본 10)로 요청 간격을 조절한다. 대기하는 동안 작업은 `running` 으로 보인다. 429 가 그래도 나면 위 "LLM 호출 실패" 행의 예비 모델·재시도를 탄다 |
+| Gemini 분당 한도 | Python 이 모델마다 슬라이딩 윈도우(`GEMINI_RPM`, 기본 4 — 무료 키 한도가 모델당 분당 5회)로 요청 간격을 조절한다. 대기하는 동안 작업은 `running` 으로 보인다. 429 가 그래도 나면 위 "LLM 호출 실패" 행의 예비 모델·재시도를 탄다 |
 | 음원 URL 이 허용되지 않음(`/analyze`) | 422 `invalid_audio_url`. 그래프의 `audioUrl` 은 무드 해석만 건너뛴다 |
 | 낡은 resume, 더블 클릭 | 409 |
 | 스레드 만료 | 410, 초안 행 정리 |
@@ -271,7 +271,7 @@ LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. G
 | on-stage: API 라우트 | `/api/sequences*`, `/api/audio-tracks*`, Python 중계, 레이트 리밋 |
 | on-stage: README | "백엔드 서버 분리 없음" 항목을 분리 근거와 함께 갱신(기획서 §9) |
 | 기획서 갱신 | 노드 A 제거(D5), `tracks` → `audio_tracks`(D7), "`mergeStageState`가 clamp한다" 가정 삭제(§2), 체크포인터 DB 분리(D2)와 `jobs`, 폴링 프로토콜(D4) 반영 |
-| 음원 약관 확인 | 기획서 §4의 체크박스 그대로 유지 |
+| 음원 약관 확인 | 확인 완료(기획서 §4): 음원은 저장소에 올리지 않고 Supabase Storage 에만 둔다. 시드 곡은 Storage 에 한 번 올리고 `audio_tracks` 행(`user_id` NULL)을 만든다. 저장소를 공개하면 on-stage README 에 "오디오는 AI 생성물이며 MIT 라이선스 대상이 아니다"를 적는다 |
 
 ## 12. 구현 계획(writing-plans)에 대한 제약
 
@@ -289,5 +289,5 @@ LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. G
 | 구조 분석 모델 | **에너지 곡선 기반 휴리스틱으로 확정, all-in-one 류는 도입하지 않는다.** 실제 곡 2개(`나만의_작은_우주`, `burn it up`)를 사람이 직접 청취해 검증: 브릿지 전후처럼 뚜렷한 전환(실측 에너지 변화 35~54%)은 정확히 잡지만, 벌스↔코러스처럼 미세한 전환(실측 3~20%, 임계값 35% 미달)은 놓친다 — 최근 믹싱의 라우드니스 압축 때문에 벌스·코러스 음량 차가 작아 에너지만으로는 원천적으로 구분이 어려움. 구간 개수·순서 등 큰 구조는 두 곡 다 맞았다. 임계값을 낮추면 일부(놓친 것 중 턱걸이 수준)는 잡히지만 노이즈성 과다 분할과 곡 2개로 튜닝하는 과적합 위험이 있어, **한계를 알고 받아들이기로 결정**했다 — 세부 보정은 4단계 interrupt #1(사람이 구간을 보고 직접 수정)에서 흡수한다 | 확정 (시퀀스 그래프 계획 Task 6, 2026-10-02 실제 곡 청취 검증) |
 | 승인본 상한 5개, 승인 후 체크포인트 삭제 24시간, 초안 방치 삭제 7일 | §5·§6.4 값 | 4단계 전 조정 가능 |
 | 호스팅 | Google Cloud Run(asia-southeast1, Neon 과 같은 지역), 1vCPU·메모리 2GiB, `--no-cpu-throttling`(CPU 항상 할당 — 요청 밖에서도 도는 백그라운드 스레드에 필수), `--max-instances 1`(RPM 제한·resume 락이 프로세스 단위, 요금 폭주 방지), `--min-instances 0`(유휴 시 자동 중지로 비용 최소화), 시크릿은 Secret Manager, 상태 확인은 `/health`, 전용 Postgres 는 Neon. **기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 의도적으로 접었다** — 평소에는 첫 요청이 콜드 스타트를 겪고, 발표·면접 당일에만 `--min-instances 1` 로 올린다. 배포 절차·환경변수·비용은 `docs/deploy.md` | 확정 (5단계 계획) |
-| Gemini RPM 기본값 | 모델당 분당 10회(`GEMINI_RPM`). 실제 계정 한도에 맞춰 조정 | 5단계 사람 단계에서 확인 |
-| 분석 입력 상한 | 파일 30MiB, 길이 180초(+1초), 분석 동시 1건 | 5단계 |
+| Gemini RPM 기본값 | 모델당 분당 4회(`GEMINI_RPM`). 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값이고, 유료 키면 `GEMINI_RPM` 으로 올린다 | 확정 |
+| 분석 입력 상한 | 파일 30MiB, 길이 300초(+1초), 분석 동시 1건. 300초 분석의 최고 메모리 약 0.8GiB(2GiB 서버에서 충분, macOS 측정) | 확정 |

@@ -81,7 +81,7 @@ on-stage 마이그레이션과 라우트가 구현한다. 이 저장소는 구�
 | `mood_keywords` | text[] | |
 | `storage_path` | text not null | 음원 버킷 경로 |
 | `file_hash` | text not null | sha256. 분석 캐시 키 |
-| `duration_sec` | numeric not null | 최대 180 |
+| `duration_sec` | numeric not null | 최대 300 |
 | `analysis` | jsonb null | `AnalysisSnapshot` (`src/stage_director/analysis/snapshot.py` 의 모양, camelCase 키) |
 | `analysis_status` | text not null | `pending` \| `running` \| `done` \| `error` |
 | `created_at` | timestamptz | |
@@ -114,6 +114,6 @@ RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`. 쓰기 `user_id = auth.ui
 ### 음원 Storage 버킷
 
 - `gallery` 와 별개의 새 버킷.
-- 허용 MIME: audio 계열(예: `audio/mpeg`, `audio/wav`). 크기 상한: 3분 곡이 들어가는 값.
+- 허용 MIME: audio 계열(예: `audio/mpeg`, `audio/wav`). 크기 상한: 30MiB(5분 mp3 는 3~12MB 라 들어가고, 44.1kHz 스테레오 wav 는 약 178초가 30MiB 라 길이보다 크기에 먼저 걸린다).
 - 정확한 버킷 이름과 상한은 on-stage 가 구현할 때 정하고, 정해지면 이 문서를 고친다(계약 갱신 태스크).
 - 업로드는 `POST /api/gallery/upload-url` 의 서명 URL 패턴을 복제한다.

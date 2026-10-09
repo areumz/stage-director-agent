@@ -35,7 +35,7 @@
 | 호스팅 | **Google Cloud Run**, 리전 `asia-southeast1`(싱가포르), 1vCPU·메모리 2GiB. `--no-cpu-throttling`, `--min-instances 0`(유휴 시 자동 중지), `--max-instances 1`, `$PORT`(기본 8080)로 기동, 시크릿은 Secret Manager(`--set-secrets`), 상태 확인 `/health`(시작·생존)·`/ready`(사람·모니터링용), 배포는 `gcloud run deploy --source .` | 비용 최소화 + GCP 경험. CPU 항상 할당이 아니면 요청 밖에서 도는 그래프·분석 스레드와 heartbeat 가 멈춘다. 최대 1대는 RPM 제한·resume 락이 프로세스 단위이기 때문이고 요금 폭주도 막는다. **리전:** Neon 에 서울 리전이 없어 가장 가까운 곳이 싱가포르이고, Python↔Neon 쿼리가 가장 많아 이 구간을 가깝게 둔다(Vercel·Supabase 는 도쿄. 도쿄는 Tier 1 이라 단가가 약 17% 싸지만 무료 한도 안에서는 차이가 없어 대안으로만 둔다). 요금은 2026-10-05 에 가격 페이지로 확인(서울·싱가포르 Tier 2, 시간당 약 $0.095, 무료 한도 $5.22/월 ≈ 55시간). 기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 의도적으로 접는다 — 평소 첫 요청은 콜드 스타트를 겪고, 필요한 경우에만 `--min-instances 1` 로 올린다(`docs/deploy.md`) |
 | 대기열 상태 알림 | `status` 값에 `queued` 를 추가한다(API 계약 변경). on-stage 는 `queued` 를 `running` 과 같은 진행 중으로 처리하고 "대기 중" 문구만 더하면 된다 | 한 곳(`status`)만 보면 되고 보존 규칙도 단순하다 |
 | 죽은 작업 처리 | **heartbeat·별도 워커 없이 시작 시 정리.** 서비스가 시작될 때 `queued`·`running` 으로 남은 작업(그래프·분석)을 `error(interrupted)` 로 바꾼다(4단계의 `fail_running` 을 `queued` 까지 확장). 사용자가 "다시 시도"하면 그래프는 마지막 체크포인트에서, 분석은 처음부터 이어진다 | 인스턴스 1대에서는 이것으로 충분하다. 배포 때 옛 인스턴스가 잠시 살아 있어도 곧 내려가므로 그 작업이 함께 `interrupted` 로 정리되는 것은 어차피 일어날 일을 앞당길 뿐이고, 줄 서 있던 작업은 `queued → running` 전이가 실패해 실행되지 않는다. heartbeat(`owner`·`heartbeat_at` 컬럼, 주기 스레드, 45초 복구 지연)는 인스턴스가 여러 대가 될 때 필요하다 |
-| `GEMINI_RPM` | 모델당 분당 10회로 시작하고 Task 9 에서 실제 계정 한도를 확인해 조정한다 | 실제 한도를 모르는 상태의 보수적 시작값 |
+| `GEMINI_RPM` | 모델당 분당 4회로 정한다(코드 기본값과 배포 명령 모두). 유료 키면 `GEMINI_RPM` 으로 올린다 | 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값 |
 | `/propose` | 엔드포인트는 유지하되 스펙에 "배포 환경에서 Next.js 는 호출하지 않는다"고 적는다 | 동기 요청이라 최악 약 6분(아래 폴백 점검 표)이라 프록시·서버리스 시간 제한에 걸린다. 시퀀스 생성은 `/runs` 를 쓴다 |
 | 스키마 변경 방식 | `CREATE TABLE IF NOT EXISTS`(4단계 모양) 뒤에 컬럼마다 `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS …` 를 이어 실행. 서비스 시작 시, `pg_advisory_xact_lock` 으로 인스턴스 동시 기동을 직렬화. 버전 관리 테이블은 만들지 않는다 | 새 DB 와 기존 DB 가 같은 경로를 타서 분기가 없고, 기존 행이 보존된다. `jobs` 는 임시 데이터라 되돌림(down) 마이그레이션이 필요 없다 |
 | 대기열 | 상태 `queued` 추가. 만들거나 재개할 때 `queued`, 스레드가 시작하는 순간 `running`. 전이가 실패하면(대기 중 다른 인스턴스의 시작 정리가 `error` 로 바꿈) 실행하지 않는다 | 풀이 찬 것을 사용자가 구별할 수 있고, 이미 정리된 작업이 늦게 깨어나 실행되는 일이 없다 |
@@ -49,7 +49,7 @@
 | 상태 확인 | `/health`(키 없음, DB 안 봄) = Cloud Run 시작·생존 확인용, `/ready`(키 없음, DB 한 번 왕복) = 사람·모니터링용 | DB 가 느려졌다고 플랫폼이 인스턴스를 내리면 장애가 커진다. 두 엔드포인트 모두 내부 정보를 노출하지 않는다 |
 | 호스팅과 이 설계의 맞물림 | Cloud Run `--no-cpu-throttling` + 최대 1대 + 유휴 시 0대. 0대로 줄었다 켜지면 **시작 시 보존 정책**이 정기 실행 역할을 하고, 유휴 중에는 주기 작업이 돌지 않는다(맡은 작업이 없으니 문제없음). `waiting_input` 작업은 DB 에만 있어 0대가 돼도 안전하다 | CPU 항상 할당이 아니면 요청이 끝난 뒤 그래프·분석 스레드가 멈춘다. 최대 1대는 RPM 제한·resume 락이 프로세스 단위이기 때문이다 |
 
-**실행 전에 on-stage 에서 받을 값.** ① Supabase 프로젝트 호스트(`abc.supabase.co`) — `AUDIO_URL_ALLOWED_HOSTS` 에 넣는다. 이 값이 없으면 **배포하지 않는다**(SSRF 방어가 공인 IP 검사만 남는다). ② 음원 버킷이 파일 크기 30MiB 이하·길이 180초 이하만 받는지 — on-stage 마이그레이션(스펙 §5)에서 맞춘다. (Task 4, 5, 8, 9)
+**실행 전에 on-stage 에서 받을 값.** ① Supabase 프로젝트 호스트(`abc.supabase.co`) — `AUDIO_URL_ALLOWED_HOSTS` 에 넣는다. 이 값이 없으면 **배포하지 않는다**(SSRF 방어가 공인 IP 검사만 남는다). ② 음원 버킷이 파일 크기 30MiB 이하·길이 300초 이하만 받는지 — on-stage 마이그레이션(스펙 §5)에서 맞춘다. (Task 4, 5, 8, 9)
 
 ## 추가 항목
 
@@ -77,7 +77,7 @@
 - 결정적 로직은 **TDD로 처음부터** 작성한다: 실패하는 테스트 → 실패 확인 → 최소 구현 → 통과 확인 (§12 제약 5).
 - `jobs` 전이는 반드시 조건부 UPDATE 로 한다 (§6.1). 분석 작업도 같은 규칙이다.
 - 보존 정책 (§6.4): 승인된 스레드는 `done` 24시간 후 **체크포인트만**, 승인되지 않은 스레드는 `updated_at` 7일 방치 시 **체크포인트와 jobs 행 모두** 삭제. 이 계획은 여기에 규칙 3(완료 행 7일)·규칙 4(분석 7일)를 **더할 뿐** 앞의 두 규칙은 바꾸지 않는다.
-- `audio_tracks.duration_sec` 최대 180 (§5) — 분석 작업이 이 상한을 강제한다.
+- `audio_tracks.duration_sec` 최대 300 (§5) — 분석 작업이 이 상한을 강제한다.
 - 전용 Postgres 는 Python 외 접근하지 않는다 (§6.1).
 - 그래프(`graph.py`·`graph_nodes.py`)의 동작은 바꾸지 않는다. 이 계획은 그 위의 작업 실행·저장·호출 계층만 건드린다(`graph_nodes.py` 는 주석 한 군데).
 - 시크릿(`INTERNAL_API_KEY`, `GEMINI_API_KEY`, `DATABASE_URL`)은 이미지·저장소에 넣지 않고 Secret Manager(`--set-secrets`)로만 넣는다.
@@ -86,7 +86,7 @@
 
 - **재시작·배포로 죽은 작업이 `queued`·`running` 으로 영원히 남지 않고, 다시 시도하면 이어진다. 줄 서 있던 작업이 정리된 뒤 늦게 깨어나도 실행되지 않는다** → Task 1(`test_fail_running_marks_queued_and_running_jobs_but_not_waiting_or_finished_ones`), Task 2(`test_a_run_killed_before_it_started_is_marked_interrupted_and_can_be_restarted`·`test_a_job_failed_while_queued_never_runs`), Task 5(분석의 같은 테스트)
 - **음원 URL 이 내부 주소·메타데이터 주소·리다이렉트·느린 응답으로 서버를 속일 수 없다**(사설/루프백/링크로컬/CGNAT/IPv4 매핑 IPv6, 허용 목록 우회 `supabase.co.evil.com`, 계정 정보 URL, 비표준 포트, DNS 가 검증 뒤에 바뀌는 경우) → Task 4
-- **분석할 수 없는 음원(텍스트를 `.mp3` 로 바꾼 파일, 빈 파일, 180초 초과, 30MiB 초과, 같은 `jobId` 재요청)이 서버를 죽이거나 `running` 으로 멈추지 않고 짧은 에러 코드로 끝난다** → Task 5(`test_build_result_rejects_text_pretending_to_be_an_mp3` 외)
+- **분석할 수 없는 음원(텍스트를 `.mp3` 로 바꾼 파일, 빈 파일, 300초 초과, 30MiB 초과, 같은 `jobId` 재요청)이 서버를 죽이거나 `running` 으로 멈추지 않고 짧은 에러 코드로 끝난다** → Task 5(`test_build_result_rejects_text_pretending_to_be_an_mp3` 외)
 - **완료된 작업의 행을 지운 뒤에도 승인본이 사라지지 않는다**: Python 이 404 를 내는 `threadId` 를 Next.js 가 410 으로 오해해 승인본 행을 지우는 일이 없어야 한다 → Task 6(`test_approved_job_rows_are_deleted_after_7_days_but_kept_before`), 계약은 Task 9 스펙 문구
 - **기존 DB(4단계 스키마, 행이 있는 Neon)에서 기동해도 행이 보존되고, 마이그레이션을 반복·동시에 실행해도 깨지지 않는다** → Task 1(`test_migrate_upgrades_the_stage_4_table_without_losing_rows`·`test_two_instances_migrating_at_once_do_not_collide`, Postgres 마커)
 
@@ -112,9 +112,9 @@
 | 보존 정책 주기 | `RETENTION_INTERVAL_SEC = 6시간` | `retention.py` |
 | 완료 행 보존 / 분석 결과 보존 | `DONE_ROW_TTL = 7일` / `ANALYSIS_TTL = 7일` | `retention.py` |
 | 분석 동시 실행 수 | `MAX_CONCURRENT_ANALYSES = 1` | `analyzer.py` |
-| 분석 입력 상한 | 파일 `MAX_ANALYSIS_AUDIO_BYTES = 30 MiB`, 길이 `MAX_DURATION_SEC = 180`(+`DURATION_TOLERANCE_SEC = 1.0`) | `analyzer.py` |
+| 분석 입력 상한 | 파일 `MAX_ANALYSIS_AUDIO_BYTES = 30 MiB`, 길이 `MAX_DURATION_SEC = 300`(+`DURATION_TOLERANCE_SEC = 1.0`) | `analyzer.py` |
 | 음원 내려받기 전체 시간 | `AUDIO_TOTAL_TIMEOUT_SEC = 60`(소켓 한 번은 기존 `AUDIO_TIMEOUT_SEC = 30`) | `audio.py` |
-| Gemini 분당 요청 수 | `DEFAULT_GEMINI_RPM = 10`(모델당, `GEMINI_RPM` 으로 변경, 0 이면 끔) | `settings.py` |
+| Gemini 분당 요청 수 | `DEFAULT_GEMINI_RPM = 4`(모델당, `GEMINI_RPM` 으로 변경, 0 이면 끔) | `settings.py` |
 | 분석 에러 코드 | `audio_unavailable` · `decode_failed` · `too_long` · `internal_error` · `interrupted` | `analyzer.py`, `jobs.py` |
 | 분석 API 에러 | 422 `invalid_audio_url` · 404 `job_not_found` | `analyzer.py` |
 
@@ -274,7 +274,7 @@ git commit -m "feat: show a queued state while the thread pool is full"
 - Test: `tests/test_ratelimit.py`(신규), `tests/test_settings.py`(신규), `tests/test_llm.py`
 
 **Interfaces:**
-- Produces: `RateLimiter(rpm, *, window=60.0, clock=time.monotonic, sleep=time.sleep).acquire()`(슬라이딩 윈도우, 락을 잡고 자지 않음), `GeminiClient(api_key, model, client=None, fallback_model=None, rpm=0, limiter_factory=RateLimiter)`(모델마다 제한기 하나, `rpm=0` 이면 제한 없음), `Settings.gemini_rpm`(`GEMINI_RPM`, 기본 `DEFAULT_GEMINI_RPM = 10`, 빈 값은 기본값, 숫자가 아니거나 음수면 기동 실패)
+- Produces: `RateLimiter(rpm, *, window=60.0, clock=time.monotonic, sleep=time.sleep).acquire()`(슬라이딩 윈도우, 락을 잡고 자지 않음), `GeminiClient(api_key, model, client=None, fallback_model=None, rpm=0, limiter_factory=RateLimiter)`(모델마다 제한기 하나, `rpm=0` 이면 제한 없음), `Settings.gemini_rpm`(`GEMINI_RPM`, 기본 `DEFAULT_GEMINI_RPM = 4`, 빈 값은 기본값, 숫자가 아니거나 음수면 기동 실패)
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
 
@@ -695,9 +695,9 @@ GEMINI_MODEL=gemini-does-not-exist uv run --env-file .env uvicorn --factory stag
 
 - [ ] **Step 5: (사람이 하는 단계) 분당 한도를 실제 계정에 맞춘다**
 
-Google AI Studio 에서 두 모델(주·예비)의 실제 분당 요청 한도를 확인하고 `GEMINI_RPM` 을 정한다. 한도 직전 값이 아니라 여유를 둔다. 5구간 곡 한 건을 처음부터 끝까지 돌려 총 소요 시간을 PR 설명에 적는다(RPM 10 이면 호출이 몰릴 때 느려지는 것이 정상).
+Google AI Studio 에서 두 모델(주·예비)의 실제 분당 요청 한도를 확인하고 `GEMINI_RPM` 을 정한다. 한도 직전 값이 아니라 여유를 둔다. 5구간 곡 한 건을 처음부터 끝까지 돌려 총 소요 시간을 PR 설명에 적는다(RPM 4 이면 호출이 몰릴 때 느려지는 것이 정상).
 
-정한 값이 10 과 다르면 **다음 Step 의 스펙 커밋에 함께 넣도록** 지금 고친다: 스펙 §13 "Gemini RPM 기본값" 행과 `docs/deploy.md` 의 `--set-env-vars` 예시(`GEMINI_RPM=…`). 코드의 `DEFAULT_GEMINI_RPM` 은 그대로 두고 환경변수로 덮는다.
+정한 값이 4 와 다르면 **다음 Step 의 스펙 커밋에 함께 넣도록** 지금 고친다: 스펙 §13 "Gemini RPM 기본값" 행과 `docs/deploy.md` 의 `--set-env-vars` 예시(`GEMINI_RPM=…`). 코드의 `DEFAULT_GEMINI_RPM` 은 그대로 두고 환경변수로 덮는다.
 
 - [ ] **Step 6: 커밋한다**
 
@@ -739,7 +739,7 @@ PR 설명에 다음을 적고 on-stage 담당에게 전한다. 이 저장소는 
 - 스펙 §4.1·§4.2 의 갱신된 API 계약(위 "API 계약 변경" 표 그대로): `/analyze`, `queued`, `interrupted`, **승인된 시퀀스에 대해 `GET /runs/{id}` 를 부르지 않기**
 - 배포된 Python 서비스 주소와 `INTERNAL_API_KEY`(안전한 경로로)
 - `seed-analysis/*.json` 파일(Task 7)과 "`file_hash`·`duration_sec`·`analysis` 로 `audio_tracks` 에 넣는다"는 설명
-- 음원 버킷 제한: 파일 30MiB 이하, 길이 180초 이하
+- 음원 버킷 제한: 파일 30MiB 이하, 길이 300초 이하
 
 ---
 
@@ -784,7 +784,7 @@ PR 설명에 다음을 적고 on-stage 담당에게 전한다. 이 저장소는 
 | 주 모델이 장시간 죽으면 모든 호출이 먼저 주 모델을 시도한다(지연 + 한도 소모). 회로 차단기는 없다 | 필요하면 `GEMINI_MODEL` 을 예비 모델 값으로 바꿔 재배포 |
 | `/propose` 는 동기 요청이다 | 배포 환경에서 Next.js 는 부르지 않는다 |
 | 분석 대기열은 사용자별 공정성이 없다(선착순). 공유 데모 계정의 남용은 Next.js 레이트 리밋에 맡긴다 | on-stage 쪽 |
-| `GEMINI_RPM` 기본값 10 은 추정이다 | Task 9 점검 단계에서 실제 한도로 |
+| `GEMINI_RPM` 기본값 4 는 무료 키 한도(모델당 분당 5회) 기준이다 | 유료 키로 바꾸면 `GEMINI_RPM` 으로 올린다 |
 | 비밀 교체(`INTERNAL_API_KEY`) 중 짧은 401 구간이 있다 | `docs/deploy.md`. 이중 키 허용은 필요해지면 |
 | 시드 곡 분석 결과를 DB 에 넣는 것은 on-stage 몫이다 | Task 9 마지막 단계 |
 
