@@ -108,7 +108,7 @@ while :; do
 done
 
 # 결과 요약 (done 일 때)
-echo "$R" | jq '{fileHash: .result.fileHash, durationSec: .result.analysis.durationSec, bpm: .result.analysis.bpm, 구간용_에너지_개수: (.result.analysis.energyCurve|length)}'
+echo "$R" | jq '{fileHash: .result.fileHash, durationSec: .result.analysis.durationSec, bpm: .result.analysis.bpm, energyCount: (.result.analysis.energyCurve|length)}'
 ```
 
 기대 결과:
@@ -237,7 +237,7 @@ while :; do R=$(api $URL/runs/$TID); echo "$R" | jq -c '{status, kind: .interrup
 # 리뷰 화면에서 전체 승인 → done, 결과 items
 api -X POST $URL/runs/$TID/resume \
   -d "$(echo "$R" | jq -c '{interruptId: .interrupt.interruptId, kind:"approve"}')" | jq -c '{status}'
-api $URL/runs/$TID | jq '{status, 구간수: (.result.items|length), 경고수: (.result.issues|length)}'
+api $URL/runs/$TID | jq '{status, sectionCount: (.result.items|length), issueCount: (.result.issues|length)}'
 ```
 
 기대 결과: `202` → `waiting_input`(confirm_sections) → resume `202` → `queued/running` → `waiting_input`(kind `review`, items 있음) → approve `202` → `done`, `items` 가 구간 수(2)만큼, 각 항목의 `state` 가 StageState 모양.
