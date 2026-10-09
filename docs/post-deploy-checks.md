@@ -129,26 +129,84 @@ api $URL/analyze/nope -w '\nHTTP %{http_code}\n'
 
 만료된 서명 URL이나 없는 파일이면 큐에는 들어가지만 `error` 로 끝나고 `error` 값이 `audio_unavailable` 이다(서버가 받지 못함).
 
-## 4. 분석 도중 새 리비전 배포
+## 4. 새 리비전 도중 확인 — 분석 + 그래프 + 초안 유지 (4번과 5번의 "도중 새 리비전"을 한 번에)
+
+재배포(빌드 포함)를 **먼저** 끝낸 뒤에 한다. 이 장은 새 리비전을 **빌드 없이 환경변수만 바꿔서** 만든다(20~40초). 필요한 것: 0장의 `URL`·`KEY`·`api`, 3장의 `AUDIO`와 **`done` 이 된 분석의 `JOB`**. 저장소 루트에서 실행한다.
+
+왜 이렇게 하나: 분석은 몇 초면 끝나서 새 인스턴스가 켜지는 순간에 겹치기 어렵다. 그래프의 제안 단계는 무료 키(분당 4회)에서 1분 안팎 걸려 확실히 겹친다. 그래서 **긴 그래프 작업을 걸어 두고** 그 사이에 새 리비전을 만들고, 분석은 여러 건을 줄 세워 같이 본다.
+
+**Step 1 — 끊기지 않아야 할 초안 만들기** (구간 확인 화면까지만 진행해 둔다)
 
 ```bash
-JOB=check-rev-$(date +%s)
-api -X POST $URL/analyze -d "$(jq -n --arg id "$JOB" --arg u "$AUDIO" '{jobId:$id, audioUrl:$u}')" | jq -c '{status,progress}'
+# 3장의 분석 결과로 진짜 곡 길이의 요청 본문을 만든다 (구간 4개 안팎)
+ANALYSIS=$(api $URL/analyze/$JOB | jq -c .result.analysis)
+CTX=$(jq -c --argjson a "$ANALYSIS" --arg u "$AUDIO" '. + {analysis:$a, durationSec:$a.durationSec, audioUrl:$u}' tests/fixtures/sequence_request.json)
 
-# 시작 직후 새 리비전 만들기 (gcloud)
+KEEP=check-keep-$(date +%s)
+api -X POST $URL/runs -d "$(jq -n --arg t "$KEEP" --argjson c "$CTX" '{threadId:$t, context:$c}')" | jq -c '{status}'
+while :; do R=$(api $URL/runs/$KEEP); echo "$R" | jq -c '{status, kind: .interrupt.kind, id: .interrupt.interruptId}'
+  [ "$(echo "$R" | jq -r .status)" = waiting_input ] && break; sleep 3; done
+```
+
+`id` 값(`…:0:confirm_sections`)을 기억해 둔다. 무드 해석(오디오 Gemini 호출)이 먼저 돌아서 수십 초 걸릴 수 있다.
+
+**Step 2 — 끊길 작업 준비** (같은 방식으로 구간 확인 화면까지)
+
+```bash
+TID=check-rev-run-$(date +%s)
+api -X POST $URL/runs -d "$(jq -n --arg t "$TID" --argjson c "$CTX" '{threadId:$t, context:$c}')" | jq -c '{status}'
+while :; do R=$(api $URL/runs/$TID); echo "$R" | jq -c '{status, kind: .interrupt.kind}'
+  [ "$(echo "$R" | jq -r .status)" = waiting_input ] && break; sleep 3; done
+```
+
+**Step 3~5 — 한 번에 붙여 넣는다** (분석 3건을 줄 세우고 → 제안 단계를 시작하고 → 곧바로 새 리비전을 만든다)
+
+```bash
+A1=check-rev-a1-$(date +%s); A2=check-rev-a2-$(date +%s); A3=check-rev-a3-$(date +%s)
+for A in $A1 $A2 $A3; do
+  api -X POST $URL/analyze -d "$(jq -n --arg id "$A" --arg u "$AUDIO" '{jobId:$id, audioUrl:$u}')" | jq -c '{jobId,status}'
+done
+api -X POST $URL/runs/$TID/resume \
+  -d "$(echo "$R" | jq -c '{interruptId: .interrupt.interruptId, kind:"sections", payload:{sections: .interrupt.sections}}')" | jq -c '{status}'
 gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars REVISION_BUMP=$(date +%s)
-
-# 폴링 (인스턴스 교체가 끝날 때까지 running 이 보일 수 있다)
-for i in $(seq 1 20); do api $URL/analyze/$JOB | jq -c '{status,progress,error}'; sleep 5; done
 ```
 
-기대 결과: 새 인스턴스가 켜진 뒤 첫 조회에서 `{"status":"error","error":"interrupted"}`. 그 뒤 **같은 `jobId` 로 다시 POST** 하면 처음부터 분석해 `queued/running` → `done`:
+gcloud 가 끝나면(20~40초) 바로 아래로 상태를 본다.
+
+**Step 6 — 상태 보기** (5초 간격, 약 2분)
 
 ```bash
-api -X POST $URL/analyze -d "$(jq -n --arg id "$JOB" --arg u "$AUDIO" '{jobId:$id, audioUrl:$u}')" | jq -c '{status,progress}'
+for i in $(seq 1 24); do
+  echo "── $(date +%H:%M:%S)"
+  echo "  그래프:   $(api $URL/runs/$TID | jq -c '{status,error}')"
+  for A in $A1 $A2 $A3; do echo "  분석 ${A##*-}: $(api $URL/analyze/$A | jq -c '{status,progress,error}')"; done
+  echo "  유지용:   $(api $URL/runs/$KEEP | jq -c '{status, id: .interrupt.interruptId}')"
+  sleep 5
+done
 ```
 
-주의: 옛 인스턴스가 끝까지 분석을 마쳐 `done` 이 되는 경우도 있다(교체 직전에 이미 끝난 경우). 확실히 보려면 곡이 긴(수십 초 걸리는) 파일로, 시작 직후에 바로 리비전을 만든다.
+기대 결과:
+- **유지용 초안(`KEEP`)**: 끝까지 `waiting_input` 이고 `id` 가 Step 1 과 **똑같다.** 배포·새 리비전에도 사람이 응답하던 초안은 남는다는 가장 중요한 확인이다.
+- **그래프(`TID`)**: `error` / `interrupted`. 새 인스턴스가 켜질 때 돌고 있던 작업이 정리된다.
+- **분석 3건**: 먼저 끝난 것은 `done`, 새 인스턴스가 켜질 때 `queued`·`running` 이던 것은 `error` / `interrupted`.
+- 전부 `done` 이거나 `running` 이었다면 타이밍이 어긋난 것이다(검증 불가). Step 2부터 다시 한다.
+
+**Step 7 — 복구 확인**
+
+```bash
+# (a) 그래프: 같은 threadId 로 다시 POST → 마지막 체크포인트에서 이어져 waiting_input(review) 까지
+api -X POST $URL/runs -d "$(jq -n --arg t "$TID" --argjson c "$CTX" '{threadId:$t, context:$c}')" | jq -c '{status}'
+while :; do R=$(api $URL/runs/$TID); echo "$R" | jq -c '{status, kind: .interrupt.kind, error}'
+  case $(echo "$R" | jq -r .status) in waiting_input|done|error) break;; esac; sleep 3; done
+
+# (b) 분석: interrupted 였던 jobId 하나(여기서는 A3)를 같은 id 로 다시 POST → 처음부터 다시 done
+api -X POST $URL/analyze -d "$(jq -n --arg id "$A3" --arg u "$AUDIO" '{jobId:$id, audioUrl:$u}')" | jq -c '{status}'
+while :; do R=$(api $URL/analyze/$A3); echo "$R" | jq -c '{status,progress,error}'
+  case $(echo "$R" | jq -r .status) in done|error) break;; esac; sleep 3; done
+```
+
+기대 결과: (a) `queued → running → waiting_input(kind review)`. "이미 끝난 구간을 다시 호출하지 않는다"는 앱 로그에 호출 단위 기록이 없어서 로그로는 못 센다. Google AI Studio 의 요청 수 그래프로 보거나, 재시작 후 걸리는 시간이 처음 제안 단계보다 눈에 띄게 짧은지로 본다. (b) 처음부터 다시 분석해 `done`.
+정리: 이 장에서 만든 `check-` 작업은 직접 지우지 않는다(보존 정책이 정리한다). 끝나면 `unset ANALYSIS CTX`.
 
 ## 5. 그래프 `/runs` — 구간 확인 → 제안 → 승인, 그리고 도중 새 리비전
 
@@ -185,16 +243,7 @@ api $URL/runs/$TID | jq '{status, 구간수: (.result.items|length), 경고수: 
 기대 결과: `202` → `waiting_input`(confirm_sections) → resume `202` → `queued/running` → `waiting_input`(kind `review`, items 있음) → approve `202` → `done`, `items` 가 구간 수(2)만큼, 각 항목의 `state` 가 StageState 모양.
 낡은 interruptId 로 resume → `409 stale_interrupt`, 이미 처리된 뒤 같은 resume 을 다시 보내면 `409 not_waiting_input` 이다.
 
-**도중 새 리비전**: 새 `TID` 로 위 시작과 구간 확인 resume 까지 한 뒤, 상태가 `running`(제안 중)일 때 바로
-
-```bash
-gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars REVISION_BUMP=$(date +%s)
-api $URL/runs/$TID | jq -c '{status,error}'     # 새 인스턴스가 켜진 뒤: error / interrupted
-# 같은 threadId 로 다시 시작 → 마지막 체크포인트에서 이어진다
-api -X POST $URL/runs -d "$(jq -n --arg t "$TID" --slurpfile c tests/fixtures/sequence_request.json '{threadId:$t, context:$c[0]}')" | jq -c '{status}'
-```
-
-기대 결과: `interrupted` 후 재시작하면 `queued → running → waiting_input(review)`. "이미 끝난 구간을 다시 호출하지 않는다"는 것은 **앱 로그에 호출 단위 기록이 없어서** 로그로는 못 센다. Google AI Studio 의 요청 수 그래프로 확인하거나, 재시작 후 걸리는 시간이 처음보다 눈에 띄게 짧은지로 본다.
+**도중 새 리비전**(끊김과 이어서 하기)은 위 **4장**에서 분석·초안 유지 확인과 함께 한다.
 
 ## 6. 대기열 (분석 풀 = 동시 1건)
 
