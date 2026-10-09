@@ -23,9 +23,9 @@ from stage_director.runner import RunError
 log = logging.getLogger(__name__)
 
 MAX_CONCURRENT_ANALYSES = 1  # librosa 한 건이 수백 MB 를 쓴다. 풀이 비어 있지 않으면 다음 분석은 queued 로 대기
-MAX_ANALYSIS_AUDIO_BYTES = 30 * 1024 * 1024  # 3분 wav(44.1kHz 스테레오 16bit)가 약 31MB. 음원 버킷의 크기 상한도 이 값 이하로 맞춘다
-MAX_DURATION_SEC = 180  # 스펙 §5 audio_tracks.duration_sec 최대
-DURATION_TOLERANCE_SEC = 1.0  # 인코더 패딩 때문에 180.02초 같은 곡이 나온다
+MAX_ANALYSIS_AUDIO_BYTES = 30 * 1024 * 1024  # 44.1kHz 스테레오 16bit wav 는 약 178초가 30MiB 라 길이보다 크기에 먼저 걸린다(mp3·ogg·flac·모노 wav 는 300초까지). 음원 버킷의 크기 상한도 이 값 이하로 맞춘다
+MAX_DURATION_SEC = 300  # 스펙 §5 audio_tracks.duration_sec 최대. 300초 분석의 최고 메모리는 약 0.8GiB(2GiB 서버에서 충분)
+DURATION_TOLERANCE_SEC = 1.0  # 인코더 패딩 때문에 300.02초 같은 곡이 나온다
 SUFFIX_BY_MIME = {
     "audio/mpeg": ".mp3",
     "audio/wav": ".wav",
