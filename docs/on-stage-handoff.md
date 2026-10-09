@@ -39,7 +39,7 @@
 
 폴링 권장: 2~3초 간격. `done`/`error`, `/runs` 는 `waiting_input` 에서도 멈춘다. `queued` 는 분석 풀이 1건이라 앞 작업이 길면(수십 초~) 오래 갈 수 있다.
 
-`progress`(분석만): 0~1 실수 또는 `null`. **단계 단위**로만 움직인다(시작 0.1 → 내려받음 0.4 → 끝 1.0). 퍼센트 바로 쓰면 오래 멈춘 것처럼 보이니 `status` 문구(대기 중/분석 중)와 함께 쓴다.
+`progress`(분석만): 0~1 실수 또는 `null`. **단계 단위**로만 움직인다(시작 0.1 → 내려받음 0.4 → 끝 1.0). 퍼센트 바로 쓰면 오래 멈춘 것처럼 보이니 `status` 문구(대기 중/분석 중)와 함께 쓴다. **`status` 가 `error` 일 때 `progress` 는 무시한다** — 끊긴 분석이 `1.0` 같은 마지막으로 기록된 값을 남길 수 있다(에러인데 100% 로 보이는 것은 정상 동작이다).
 
 ## 3. 음원 분석 — `/analyze`
 
@@ -286,6 +286,8 @@ POST /runs ─▶ queued/running ─▶ waiting_input  [kind: confirm_sections] 
 
 - **분석:** 5분 곡 기준 측정 자체는 약 2~3초이고, 음원 내려받기와 대기열을 합쳐 대략 수 초~수십 초. 대기열이 없을 때.
 - **시퀀스 생성:** 구간마다 Gemini 호출이 한 번씩 필요하고, 현재 무료 키 기준 **모델당 분당 4회**로 속도를 제한한다. 구간이 8개인 5분 곡은 단순 계산으로 약 2분, 자동 재생성(위반 구간 최대 2회)이 붙으면 3~4분까지 걸린다(구간은 곡이 길수록 늘며 최대 12개). 진행 화면은 "생성 중(2~4분 걸릴 수 있음)" 정도로 안내한다.
+- **무드 해석(`audioUrl` 을 준 경우):** 첫 구간 확인 화면이 뜨기 전에 오디오 해석이 한 번 돌고, 실패하면 최대 3번(최초 + 2회) 재시도하므로 **최대 40초쯤** 걸릴 수 있다. 그래도 실패하면 무드가 빈 채로 진행한다(에러가 아니다).
+- **재시작 직후 1분쯤은 429 가 한 번 날 수 있다.** 분당 요청 카운터가 서버 메모리에 있어서 재시작·새 리비전 때 초기화되기 때문이다. 서버가 재시도하지만 끝까지 실패하면 `llm_quota_exceeded` 로 나오며, 1분쯤 뒤 다시 시도하면 된다.
 - **주 모델 혼잡(503):** 가끔 일어난다. 서버가 예비 모델·재시도로 흡수하지만 그만큼 느려진다.
 - 유료 키로 바꾸면 `GEMINI_RPM` 환경변수만 올리면 빨라진다(서버 설정, on-stage 변경 없음).
 
@@ -308,3 +310,142 @@ POST /runs ─▶ queued/running ─▶ waiting_input  [kind: confirm_sections] 
 - [ ] `approved` 시퀀스에 대해 Python 을 호출하지 않기
 - [ ] 시드 곡: `audio_tracks` 행을 `user_id = NULL` 로 만들고 `file_hash`·`duration_sec`·`analysis` 는 Python 쪽에서 받은 `seed-analysis/*.json` 의 값을 사용 (`{fileName, fileHash, durationSec, analysis}`)
 - [ ] 저장소를 공개하면 README 에 "오디오는 AI 생성물이며 MIT 라이선스 대상이 아니다" 고지
+
+---
+
+# 부록 — 추가 (on-stage 요청 답변, 2026-10-09)
+
+아래는 위 본문에 **없던 내용을 추가**한 것이다. 위 본문(§1~§9)은 바꾸지 않았다.
+
+## 추가 A. 스키마 정리 (스펙 §5 + `contracts/supabase_required.md` 2부)
+
+on-stage 가 마이그레이션으로 만들 것. 이 저장소는 DDL 을 갖지 않는다(요구사항만). 원본: `docs/superpowers/specs/stage-director-agent-design.md` §5, `contracts/supabase_required.md` 2부(신규 요구사항). `contracts/*.md` 의 다른 파일(`stage_state`·`api_stage_presets`·`artist_context`·`enums_and_constants`)은 **on-stage 코드에서 가져온 사실의 사본**이라 on-stage 에는 새 정보가 아니다(`StageState` 의 범위·기본값만 아래 추가 D 에 다시 적었다).
+
+### `audio_tracks`
+
+| 컬럼 | 타입 | 규칙 |
+| --- | --- | --- |
+| `id` | uuid pk | `POST /analyze` 의 `jobId` 로 쓴다 |
+| `user_id` | uuid null | **NULL = 시드 곡.** 업로드 곡은 기본값 `auth.uid()` |
+| `artist_id` | uuid not null | `artists` 참조 |
+| `title` | text not null | |
+| `genre` | text | |
+| `mood_keywords` | text[] | |
+| `storage_path` | text not null | 음원 버킷 경로 |
+| `file_hash` | text not null | sha256. 분석 캐시 키. Python 이 돌려주는 `result.fileHash` 와 같은 값 |
+| `duration_sec` | numeric not null | **최대 300** |
+| `analysis` | jsonb null | `result.analysis` 를 그대로 (§3.2: `durationSec, bpm, beatsSec, energyCurve, onsetDensity`, camelCase) |
+| `analysis_status` | text not null | `pending` \| `running` \| `done` \| `error` (Python 상태 대응은 §3.2) |
+| `created_at` | timestamptz | |
+
+RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`(시드 공개), 쓰기 `user_id = auth.uid()`.
+
+### `stage_sequences`
+
+| 컬럼 | 타입 | 규칙 |
+| --- | --- | --- |
+| `id` | uuid pk | **= Python 의 `threadId`** |
+| `user_id` | uuid not null | 기본값 `auth.uid()` |
+| `audio_track_id` | uuid not null | `audio_tracks` 참조 |
+| `status` | text not null | `draft` \| `approved` |
+| `items` | jsonb null | 승인 전 NULL. `result.items`(아래 `SequenceItem` 배열) |
+| `approved_at` | timestamptz null | |
+| `created_at` | timestamptz | |
+
+- RLS: `stage_presets` 와 같은 완전 사용자 스코프(`user_id = auth.uid()`).
+- 부분 유니크 인덱스: `(user_id, audio_track_id) WHERE status = 'draft'` — 곡당 초안은 하나.
+- **승인본 5개 상한**은 `(user_id, audio_track_id)` 단위이며 Next.js 라우트에서 강제한다(DB 제약 아님).
+
+### `SequenceItem` (= `items` 배열의 원소)
+
+```json
+{ "sectionLabel": "chorus", "startSec": 62.0, "endSec": 114.0, "transitionMs": 2000,
+  "state": { /* StageState */ }, "rationale": "에너지 비 1.12: …" }
+```
+
+불변식(Python 게이트와 on-stage 저장 직전이 **같은 규칙**을 쓴다. 경계 비교에는 **±0.001초 허용 오차**를 둔다 — 같은 오차를 안 쓰면 Python 이 통과시킨 시퀀스가 저장 단계에서 거절될 수 있다):
+
+- 배열 순서 = 시간 순서, 각 항목 `startSec < endSec`
+- 첫 `startSec = 0`, 마지막 `endSec = duration_sec`, `items[i].endSec == items[i+1].startSec`
+- `0 <= transitionMs <= (endSec - startSec) * 1000`
+
+### 음원 Storage 버킷 (신규, `gallery` 와 별개)
+
+- 허용 형식: **mp3 · wav · flac · ogg**, 크기 **30MiB** 이하(§3.3). 시드 곡은 모든 사용자가 읽을 수 있어야 한다(재생용 서명 URL 발급).
+- 업로드는 `POST /api/gallery/upload-url` 의 서명 URL 패턴을 복제. 크기·타입 검사는 사용자에게 빨리 알려 주기 위한 것이고 신뢰 경계는 버킷 설정이다.
+- 음원 파일은 이 저장소(git)에 없다. **Storage 에만 둔다.**
+
+## 추가 B. 구간 `label` 의 전체 어휘
+
+`sections[].label` 과 `items[].sectionLabel` 은 같은 값이다.
+
+| 출처 | 값 |
+| --- | --- |
+| 자동 구간 검출이 붙이는 값 (영문 소문자) | `intro`(첫 구간) · `outro`(마지막 구간) · `chorus`(그 사이이면서 곡 평균보다 에너지가 큼) · `verse`(그 사이이면서 평균 이하) |
+| 곡이 짧거나(약 16초 이하) 분석이 없어 구간이 하나뿐일 때 | `intro` 하나 |
+| 사람이 구간 확인 화면에서 고친 값 | **자유 문자열**(공백만은 불가, 1~40자). 예: `bridge`, `드롭` |
+
+- `bridge`·`pre-chorus` 같은 값은 **자동으로는 나오지 않는다.** 사람이 붙일 때만 생긴다.
+- 그러므로 on-stage 는 **네 개를 기본값으로 알되 임의 문자열을 그대로 표시**해야 한다(범위 밖 값이 와도 깨지면 안 된다). 같은 라벨이 여러 번 나올 수 있다(예: `chorus` 3개).
+- 자동 라벨은 에너지 휴리스틱이라 실제 곡 구조와 다를 수 있다(벌스를 `chorus` 로 붙이기도 한다).
+
+## 추가 C. `transitionMs` 의 의미
+
+**맞다. "구간 `i` 가 시작될 때 이전 구간 `i-1` 의 `state` 에서 `items[i].state` 로 보간해 가는 데 걸리는 시간(밀리초)"으로 확정해서 쓴다.** 스펙에는 방향이 글로 명시돼 있지 않고, "구간 사이 보간은 ref + `useFrame` 에서 처리하고 구간 경계에서만 state 를 커밋한다"(기획서)와 불변식(`0 <= transitionMs <= 구간 길이`)에서 나오는 해석이다 — 전환이 그 구간 안에서 끝나야 한다는 뜻이 불변식이므로 "구간 시작에서 시작해 이 구간 안에서 끝난다"가 맞다.
+
+- 첫 항목(`i = 0`)은 이전 구간이 없다. 어디서부터 보간할지(현재 씬 상태, 기본 상태 등)는 **on-stage 가 정한다**.
+- 현재 Python 이 만드는 값은 **모든 항목이 2000**이다(구간이 2초보다 짧으면 그 구간 길이로 줄임). LLM 이 정하는 값이 아니다. on-stage 가 값을 바꿔 저장하려면 위 불변식 범위 안에서 바꾼다.
+
+## 추가 D. 밝기 값의 범위
+
+- **`state.spots.<left|center|right>.intensity` 의 범위는 0~1000** — on-stage 슬라이더와 같다(기본 300, step 10). 범위를 벗어난 값은 Python 이 clamp 하고 `issues` 에 `clamped` 를 남긴다. `angle` 0.1~1.0, `penumbra` 0~1(에이전트가 안 바꾸고 기본 0.6 유지), `smoke.density` 0~1.
+- **경고 임계값 500·600 의 정체:** 같은 0~1000 눈금이다. 게이트는 구간의 "밝기"를 **켜져 있는(`on: true`) 스팟 중 가장 높은 `intensity`** 로 정의한다(합이나 평균이 아님, 켜진 스팟이 없으면 0).
+  - `calm_too_bright`: 곡 평균 대비 에너지 비가 **0.9 이하**인 잔잔한 구간에서 밝기가 **500 초과**면 경고. 메시지 예시의 `600 (> 500)` 은 "밝기 600 이 상한 500 을 넘었다"는 뜻이다.
+  - 500 은 슬라이더 최대값(1000)의 절반이다. 규칙이 아니라 **초기 조정값**이며 실제 곡으로 보고 바뀔 수 있다.
+  - `energy_brightness_direction`: 인접 구간의 에너지 비 변화가 0.15 를 넘는데 밝기는 반대 방향으로 변하면 경고.
+- 경고는 **승인을 막지 않는다**(구간별 자동 재생성 2회 후에도 남은 것만 `issues` 로 보인다).
+
+## 추가 E. 시드 곡 분석 JSON 과 예시 시퀀스 JSON
+
+저장소(git)에는 올리지 않는다(`seed-analysis/` 는 gitignore). **파일로 따로 전달한다.**
+
+### E-1. 분석 결과 (`/analyze` 와 같은 모양)
+
+위치: 저장소 루트 `seed-analysis/<곡 이름>.json`. 만드는 명령(오프라인, Gemini 안 씀):
+
+```bash
+uv run python -m stage_director.analysis.seed demo-tracks/*.mp3 --out seed-analysis
+```
+
+```json
+{ "fileName": "Burn-it-up.mp3", "fileHash": "<sha256>", "durationSec": 173.819, "analysis": { "durationSec": 173.819, "bpm": 99.38, "beatsSec": [], "energyCurve": [], "onsetDensity": [] } }
+```
+
+`audio_tracks` 에는 `fileHash → file_hash`, `durationSec → duration_sec`, `analysis → analysis` 로 넣고, `analysis_status = done`, `user_id = NULL`.
+현재 만들어 둔 곡: `Small-universe`(160.5초, BPM 86.13, 구간 6), `Burn-it-up`(173.8초, BPM 99.38, 구간 4), `A_Room_Without_Noise`(184.4초, BPM 89.1, 구간 4). (`demo-tracks/` 에는 길이 시험용 `long-test.mp3`(295초)도 있지만 시드 곡이 아니라 제외했다. 같은 곡의 예전 이름 파일 `burn it up.json`, `나만의_작은_우주.json` 은 이름만 다른 이전 산출물이다.)
+
+### E-2. 승인까지 끝난 예시 시퀀스 (`/runs` 의 `done` 결과와 같은 모양)
+
+위치: `seed-analysis/<곡 이름>.sequence.json`. 만드는 스크립트 `scripts/make_example_sequence.py`:
+
+```bash
+uv run python scripts/make_example_sequence.py                    # 기본: 규칙 기반, Gemini 안 씀, 쿼터 0
+uv run python scripts/make_example_sequence.py --mode gemini     # 실제 그래프(구간 확인→제안→승인)를 로컬에서 돌림. 곡당 Gemini 5~9회
+uv run python scripts/make_example_sequence.py "demo-tracks/Burn-it-up.mp3" --out some-dir
+```
+
+```json
+{ "fileName": "Burn-it-up.mp3", "fileHash": "…", "durationSec": 173.819, "artistSlug": "aurora",
+  "generatedBy": "rule-based example (no LLM)",
+  "result": { "sections": [ … ], "items": [ … ], "issues": [ … ] } }
+```
+
+- `result` 가 `GET /runs/{id}` 의 `done` 응답의 `result` 와 **같은 모양**이라 화면 개발과 "시드 곡 캐시된 예시 시퀀스 폴백"에 그대로 쓴다. `items` 는 §4.5 의 불변식을 통과한다(스크립트가 확인).
+- **`generatedBy`: `"rule-based example (no LLM)"` 는 에너지 비로 밝기를 정한 개발용 예시**이고 Gemini 가 만든 연출이 아니다(rationale 끝에 "(규칙 기반 예시)"가 붙는다). 실제 모델 결과가 필요하면 `--mode gemini`(무드 해석 포함)로 만든다.
+- 구간 수·라벨은 §추가 B, 밝기 규칙은 §추가 D 와 같다. 예: `Burn-it-up` 은 `intro·chorus·verse·outro` 4구간, 잔잔한 `verse` 는 가운데 스팟만 켜고 밝기 390(≤ 500).
+- 아티스트는 `aurora`(`#9F77DD`)로 고정이다. 다른 아티스트로 보려면 스크립트의 `FIXTURE` 아티스트를 바꾼다.
+
+## 추가 F. 이 부록이 바꾸지 않은 것
+
+- API 계약(§3~§5)은 그대로다. 에러 코드·상태값·제한도 같다.
+- 이 부록의 추가 C(`transitionMs` 방향)는 **스펙에 글로 없던 해석을 확정**한 것이다. on-stage 가 다르게 구현해야 한다면 알려 달라.
