@@ -251,6 +251,7 @@ POST /runs ─▶ queued/running ─▶ waiting_input  [kind: confirm_sections] 
 | `error` | 대상 | 뜻 | 처리 |
 | --- | --- | --- | --- |
 | `llm_failed` | `/runs` | Gemini 호출이 재시도·예비 모델 전환 후에도 실패 | "다시 시도" → 같은 `threadId` 로 `POST /runs`: **마지막 체크포인트에서 이어간다** |
+| `llm_quota_exceeded` | `/runs` | Gemini 가 한도 초과(429)를 돌려줘 예비 모델까지 실패. **분당·하루 한도를 구분하지 않고 모두 이 코드**다. 다시 시도해도 같을 수 있다(하루 한도면 다음 날까지) | 사용자에게 “지금은 사용 한도를 초과했습니다”로 안내하고 **잠시 뒤나 내일 다시** 시도하게 한다. 버튼을 연타하게 두지 않는다. 시드 곡(미리 만든 예시 시퀀스) 체험을 안내한다. 한도가 풀린 뒤 같은 `threadId` 로 `POST /runs` 하면 마지막 체크포인트에서 이어간다 |
 | `internal_error` | 둘 다 | 예상 못 한 서버 오류(상세는 서버 로그에만) | 재시도 가능. 반복되면 보고 |
 | `interrupted` | 둘 다 | 처리 중 서버가 재시작·교체되어 작업이 끊김 | "다시 시도": `/runs` 는 이어서, `/analyze` 는 처음부터 |
 | `audio_unavailable` | `/analyze` | 음원을 내려받지 못함(URL 만료·없는 파일·차단·시간 초과) | 새 서명 URL 로 다시 POST |

@@ -20,7 +20,7 @@ from langgraph.types import Command
 from stage_director.analysis.sections import validate_section_edit
 from stage_director.graph_nodes import MAX_CONCURRENT_PROPOSALS
 from stage_director.jobs import Job, JobStore
-from stage_director.llm.client import LLMError
+from stage_director.llm.client import LLMError, LLMQuotaError
 from stage_director.models import (
     FeedbackResume,
     ResumeRequest,
@@ -119,7 +119,10 @@ class Runner:
                 self._jobs.transition(thread_id, from_={"running"}, to="done", result=self._result(thread_id))
         except Exception as e:
             log.exception("run %s failed", thread_id)
-            error = "llm_failed" if isinstance(e, LLMError) else "internal_error"
+            if isinstance(e, LLMQuotaError):
+                error = "llm_quota_exceeded"
+            else:
+                error = "llm_failed" if isinstance(e, LLMError) else "internal_error"
             self._jobs.transition(thread_id, from_={"running"}, to="error", error=error)
 
     def _pending_interrupt(self, thread_id: str) -> dict[str, Any] | None:

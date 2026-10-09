@@ -3,7 +3,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from stage_director.graph import build_sequence_graph
 from stage_director.jobs import InMemoryJobStore
-from stage_director.llm.client import LLMError
+from stage_director.llm.client import LLMError, LLMQuotaError
 from stage_director.llm.fake import FakeLLM
 from stage_director.models import (
     ApproveResume,
@@ -175,6 +175,12 @@ def test_llm_failure_marks_error_and_retry_continues_from_the_checkpoint():
     status = runner.start("t1", SHORT)  # 다시 시도: 같은 thread_id, 마지막 체크포인트에서 재개
     assert status.status == "waiting_input" and status.interrupt["kind"] == "review"
     assert len(llm.calls) == 4  # 3번 실패 + 재시도 1번. 구간 확인(interrupt #1)부터 다시 하지 않았다
+
+
+def test_quota_failure_is_reported_as_llm_quota_exceeded():
+    runner, _, _ = make(LLMQuotaError("429"), LLMQuotaError("429"), LLMQuotaError("429"))
+    status = runner.resume("t1", sections_resume(runner.start("t1", SHORT)))
+    assert status.status == "error" and status.error == "llm_quota_exceeded"  # 그 밖의 LLM 실패는 위 테스트처럼 llm_failed
 
 
 def test_unexpected_errors_do_not_leak_details():

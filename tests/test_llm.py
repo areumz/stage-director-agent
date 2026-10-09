@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stage_director.llm.client import LLMError
+from stage_director.llm.client import LLMError, LLMQuotaError
 from stage_director.llm.fake import FakeLLM
 from stage_director.llm.gemini import GeminiClient
 
@@ -220,3 +220,34 @@ def test_audio_calls_are_limited_too():
 def test_rpm_zero_means_no_limiter():
     client, _, made = limited({"primary": SimpleNamespace(text="{}")}, rpm=0)
     assert call(client) == {} and made == []
+
+
+# ── 한도 초과(429)는 최종 실패 종류만 구분한다 ───────────────────
+
+
+class QuotaApiError(Exception):
+    """google-genai 의 APIError 처럼 code 속성을 가진 오류."""
+
+    code = 429
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("429 RESOURCE_EXHAUSTED. quota exceeded"), RuntimeError("Quota exceeded for metric ... RESOURCE_EXHAUSTED"), QuotaApiError("limit")],
+)
+def test_gemini_raises_a_quota_error_when_the_final_failure_is_429(error):
+    client, stub = with_models({"primary": error, "backup": error})
+    with pytest.raises(LLMQuotaError):
+        call(client)
+    assert stub.called == ["primary", "backup"]  # 예비 모델로 넘어가는 동작은 그대로다
+
+
+def test_gemini_keeps_plain_llm_errors_for_non_quota_failures_and_for_a_non_quota_final_failure():
+    client, _ = with_models({"primary": RuntimeError("503 UNAVAILABLE"), "backup": RuntimeError("503 UNAVAILABLE")})
+    with pytest.raises(LLMError) as e:
+        call(client)
+    assert not isinstance(e.value, LLMQuotaError)
+    client, _ = with_models({"primary": RuntimeError("429 RESOURCE_EXHAUSTED"), "backup": RuntimeError("503 UNAVAILABLE")})
+    with pytest.raises(LLMError) as e:  # 최종 실패가 429 가 아니면 llm_failed
+        call(client)
+    assert not isinstance(e.value, LLMQuotaError)

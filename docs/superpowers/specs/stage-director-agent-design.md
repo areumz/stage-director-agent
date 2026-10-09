@@ -222,7 +222,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 | 상황 | 동작 |
 | --- | --- |
-| LLM 호출 실패 | 호출마다 주 모델 실패 시 예비 모델(`GEMINI_FALLBACK_MODEL`)로 1회 더 시도하고, 노드 단위 재시도 2회(무드 해석도 2회) → 실패 시 `jobs.status=error`와 메시지. 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
+| LLM 호출 실패 | 호출마다 주 모델 실패 시 예비 모델(`GEMINI_FALLBACK_MODEL`)로 1회 더 시도하고, 노드 단위 재시도 2회(무드 해석도 2회) → 실패 시 `jobs.status=error`와 메시지(최종 실패가 429 RESOURCE_EXHAUSTED 이면 `llm_quota_exceeded`, 분당·하루 한도 구분 없음. 그 밖은 `llm_failed`). 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
 | `/propose` 동기 호출 | 최악 약 6분(주 모델 60초 + 예비 모델 60초, 노드 재시도 3회)이라 프록시·서버리스 시간 제한에 걸린다. 배포 환경에서 Next.js 는 호출하지 않고 시퀀스 생성은 `/runs` 를 쓴다 |
 | 구조 출력이 스키마 불일치 | 1층에서 폴백·clamp, 필드 하나가 깨져도 나머지 유지(필드별 방어) |
 | Python 서비스 다운 | Next.js가 502. 시드 곡의 캐시된 예시 시퀀스로 폴백(기획서 §11, Next.js 측 구현) |

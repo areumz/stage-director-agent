@@ -11,12 +11,17 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from stage_director.llm.client import LLMError
+from stage_director.llm.client import LLMError, LLMQuotaError
 from stage_director.llm.ratelimit import RateLimiter
 
 log = logging.getLogger(__name__)
 
 TIMEOUT_MS = 60_000
+
+
+def _is_quota_error(e: Exception) -> bool:
+    """429 / RESOURCE_EXHAUSTED. SDK 오류는 code 속성을 갖고, 그 밖의 경우는 메시지 문구로 판단한다."""
+    return getattr(e, "code", None) == 429 or "RESOURCE_EXHAUSTED" in str(e) or str(e).lstrip().startswith("429")
 
 
 class GeminiClient:
@@ -60,4 +65,5 @@ class GeminiClient:
                 if i + 1 < len(self._models):
                     log.warning("Gemini %s 호출 실패, 예비 모델 %s 로 다시 시도: %s: %s", model, self._models[i + 1], type(e).__name__, e)
                     continue
-                raise LLMError(f"{type(e).__name__}: {e}") from e
+                error_class = LLMQuotaError if _is_quota_error(e) else LLMError  # 예비 모델 전환 로직은 그대로, 최종 실패의 종류만 구분
+                raise error_class(f"{type(e).__name__}: {e}") from e
