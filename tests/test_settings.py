@@ -37,3 +37,7 @@ def test_audio_allowed_hosts_are_split_trimmed_and_lowercased(monkeypatch):
     assert Settings.from_env().audio_allowed_hosts == ()
     monkeypatch.setenv("AUDIO_URL_ALLOWED_HOSTS", " Abc.supabase.co ,, cdn.example.com ")
     assert Settings.from_env().audio_allowed_hosts == ("abc.supabase.co", "cdn.example.com")
+
+
+def test_default_rpm_stays_under_the_free_key_limit():
+    assert 0 < DEFAULT_GEMINI_RPM < 5  # 무료 키 한도가 모델당 분당 5회. 유료 키면 GEMINI_RPM 으로 올린다
