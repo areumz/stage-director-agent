@@ -22,10 +22,8 @@ log = logging.getLogger(__name__)
 
 MAX_SECTION_REGEN = 2  # 스펙 §7: 위반 구간은 최대 2회 자동 재생성
 
-# ponytail: Send 팬아웃이 구간 수만큼 한꺼번에 LLM 을 부르면 Gemini 무료 티어의 분당 요청 한도를
-# 바로 넘길 수 있다. invoke(config={"max_concurrency": ...})로 한 슈퍼스텝의 동시 실행 수만 묶는
-# 가장 단순한 완화책이며, 분당 요청 수(RPM)를 정확히 지키는 진짜 속도 제한·백오프는 x
-# 필요해지면 토큰 버킷 등으로 올릴 것
+# Send 팬아웃이 구간 수만큼 한꺼번에 LLM 을 부르지 않도록 한 슈퍼스텝의 동시 실행 수를 묶는다.
+# 분당 요청 수는 GeminiClient 의 RateLimiter 가 지킨다(이 값은 순간 부하를 줄이는 용도).
 MAX_CONCURRENT_PROPOSALS = 3
 
 

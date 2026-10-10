@@ -1,6 +1,7 @@
 """보존 정책 (스펙 §6.4). 규칙 1: 승인(done) 24시간 후 체크포인트만. 규칙 2: 미승인 7일 방치 시 체크포인트와 jobs 행 모두."""
 
 import contextlib
+import threading
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -20,7 +21,13 @@ from stage_director.models import (
     SectionsPayload,
     SectionsResume,
 )
-from stage_director.retention import DONE_CHECKPOINT_TTL, DRAFT_TTL, purge
+from stage_director.retention import (
+    ANALYSIS_TTL,
+    DONE_CHECKPOINT_TTL,
+    DONE_ROW_TTL,
+    DRAFT_TTL,
+    purge,
+)
 from stage_director.runner import Runner
 from stage_director.settings import Settings
 from tests.conftest import InlineExecutor
@@ -84,7 +91,7 @@ def test_purge_is_safe_to_repeat():
     runner, jobs, saver = setup()
     approve_run(runner)
     now = later(DONE_CHECKPOINT_TTL + timedelta(days=30))
-    assert purge(jobs, saver, now=now) == (1, 0)
+    assert purge(jobs, saver, now=now) == (1, 0, 1, 0)
     purge(jobs, saver, now=now)  # 이미 지운 스레드를 다시 지워도 에러 없음
 
 
@@ -99,6 +106,54 @@ def test_startup_purges_stale_jobs_before_marking_running_ones_interrupted():
         pass
     assert store.get("old") is None  # 방치로 삭제 (interrupted 로 바뀌며 시계가 리셋되기 전에)
     assert store.get("fresh").error == "interrupted"
+
+
+def test_approved_job_rows_are_deleted_after_7_days_but_kept_before():
+    runner, jobs, saver = setup()
+    approve_run(runner)
+    purge(jobs, saver, now=later(DONE_ROW_TTL - timedelta(days=1)))
+    assert jobs.get("t1") is not None and not has_checkpoint(saver, "t1")  # 체크포인트는 24시간에 이미 사라졌다
+    assert purge(jobs, saver, now=later(DONE_ROW_TTL + timedelta(days=1))).done_rows == 1
+    assert jobs.get("t1") is None
+
+
+def test_analysis_rows_are_deleted_7_days_after_their_last_update_in_any_state():
+    _, jobs, saver = setup()
+    for job_id, status in (("done", "done"), ("failed", "error"), ("stuck", "running")):
+        jobs.create(job_id, kind="analysis")
+        if status != "running":
+            jobs.transition(job_id, from_={"running"}, to=status, error="x" if status == "error" else None)
+    assert purge(jobs, saver, now=later(ANALYSIS_TTL - timedelta(days=1))).analyses == 0  # 탭을 닫았다 돌아와도 결과를 받을 수 있다
+    assert purge(jobs, saver, now=later(ANALYSIS_TTL + timedelta(days=1))).analyses == 3
+    assert [jobs.get(j) for j in ("done", "failed", "stuck")] == [None, None, None]
+
+
+def test_graph_rules_do_not_touch_analysis_rows_and_the_analysis_rule_does_not_touch_graph_rows():
+    runner, jobs, saver = setup()
+    approve_run(runner)
+    jobs.create("a1", kind="analysis")
+    jobs.transition("a1", from_={"running"}, to="done", result={"analysis": {}})
+    counts = purge(jobs, saver, now=later(DONE_CHECKPOINT_TTL + timedelta(hours=1)))
+    assert counts == (1, 0, 0, 0) and jobs.get("a1") is not None  # 분석 결과는 24시간이 지나도 남는다
+    purge(jobs, saver, now=later(ANALYSIS_TTL + timedelta(days=1)))
+    assert jobs.get("a1") is None and jobs.get("t1") is None  # 둘 다 7일 뒤 각자의 규칙으로 사라진다
+
+
+def test_the_running_service_purges_periodically(monkeypatch):
+    runs = threading.Event()
+    calls = []
+
+    def fake_purge(jobs, saver):
+        calls.append(1)
+        if len(calls) >= 2:
+            runs.set()
+
+    monkeypatch.setattr("stage_director.api.purge", fake_purge)
+    monkeypatch.setattr("stage_director.api.RETENTION_INTERVAL_SEC", 0.02)
+    settings = Settings(internal_api_key="k", gemini_api_key="unused", gemini_model="unused", database_url="unused")
+    app = create_app(settings, FakeLLM(), lambda: contextlib.nullcontext(InMemorySaver()), job_store=InMemoryJobStore(), executor=InlineExecutor())
+    with TestClient(app):
+        assert runs.wait(2)  # 시작 시 한 번 + 주기 실행
 
 
 @pytest.mark.postgres

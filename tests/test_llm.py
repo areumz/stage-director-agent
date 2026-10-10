@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from stage_director.llm.client import LLMError
+from stage_director.llm.client import LLMError, LLMQuotaError
 from stage_director.llm.fake import FakeLLM
 from stage_director.llm.gemini import GeminiClient
 
@@ -173,3 +173,81 @@ def test_gemini_falls_back_on_unparsable_text_too():
     client, stub = with_models({"primary": SimpleNamespace(text="not json"), "backup": SimpleNamespace(text='{"a": 1}')})
     assert call(client) == {"a": 1}
     assert stub.called == ["primary", "backup"]
+
+
+# ── 분당 요청 수 제한 (모델마다 따로) ─────────────────────────────
+
+
+class RecordingLimiter:
+    """acquire 가 불린 순서를 공유 로그에 남긴다."""
+
+    def __init__(self, rpm, log, name):
+        self.rpm, self.log, self.name = rpm, log, name
+
+    def acquire(self):
+        self.log.append(f"acquire:{self.name}")
+
+
+def limited(results, rpm=7):
+    log, made = [], []
+
+    def factory(rpm_):
+        limiter = RecordingLimiter(rpm_, log, ["primary", "backup"][len(made)])
+        made.append(limiter)
+        return limiter
+
+    stub = PerModelStub(results)
+    original = stub.generate_content
+    stub.generate_content = lambda **kw: (log.append(f"call:{kw['model']}"), original(**kw))[1]
+    client = GeminiClient("unused", "primary", client=SimpleNamespace(models=stub), fallback_model="backup", rpm=rpm, limiter_factory=factory)
+    return client, log, made
+
+
+def test_each_model_gets_its_own_limiter_and_waits_before_every_request():
+    client, log, made = limited({"primary": RuntimeError("503"), "backup": SimpleNamespace(text='{"a": 1}')})
+    assert call(client) == {"a": 1}
+    assert [m.rpm for m in made] == [7, 7]
+    # 실패해서 예비 모델로 넘어가는 시도도 각 모델의 한도를 따로 쓴다
+    assert log == ["acquire:primary", "call:primary", "acquire:backup", "call:backup"]
+
+
+def test_audio_calls_are_limited_too():
+    client, log, _ = limited({"primary": SimpleNamespace(text='{"a": 1}'), "backup": RuntimeError("never")})
+    client.generate_json_with_audio(system="s", user="u", schema=SCHEMA, audio=b"a", mime_type="audio/mpeg")
+    assert log == ["acquire:primary", "call:primary"]
+
+
+def test_rpm_zero_means_no_limiter():
+    client, _, made = limited({"primary": SimpleNamespace(text="{}")}, rpm=0)
+    assert call(client) == {} and made == []
+
+
+# ── 한도 초과(429)는 최종 실패 종류만 구분한다 ───────────────────
+
+
+class QuotaApiError(Exception):
+    """google-genai 의 APIError 처럼 code 속성을 가진 오류."""
+
+    code = 429
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("429 RESOURCE_EXHAUSTED. quota exceeded"), RuntimeError("Quota exceeded for metric ... RESOURCE_EXHAUSTED"), QuotaApiError("limit")],
+)
+def test_gemini_raises_a_quota_error_when_the_final_failure_is_429(error):
+    client, stub = with_models({"primary": error, "backup": error})
+    with pytest.raises(LLMQuotaError):
+        call(client)
+    assert stub.called == ["primary", "backup"]  # 예비 모델로 넘어가는 동작은 그대로다
+
+
+def test_gemini_keeps_plain_llm_errors_for_non_quota_failures_and_for_a_non_quota_final_failure():
+    client, _ = with_models({"primary": RuntimeError("503 UNAVAILABLE"), "backup": RuntimeError("503 UNAVAILABLE")})
+    with pytest.raises(LLMError) as e:
+        call(client)
+    assert not isinstance(e.value, LLMQuotaError)
+    client, _ = with_models({"primary": RuntimeError("429 RESOURCE_EXHAUSTED"), "backup": RuntimeError("503 UNAVAILABLE")})
+    with pytest.raises(LLMError) as e:  # 최종 실패가 429 가 아니면 llm_failed
+        call(client)
+    assert not isinstance(e.value, LLMQuotaError)

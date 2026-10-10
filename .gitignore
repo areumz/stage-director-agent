@@ -9,8 +9,11 @@ venv/
 .ruff_cache/
 .DS_Store
 
-# 데모 음원(Lyria 생성곡)은 이용 약관 확인 전까지 저장소에 올리지 않는다
+# 데모 음원(Lyria 생성곡)은 저장소에 올리지 않고 Supabase Storage 에만 둔다(용량, AI 생성물이라 MIT 라이선스 대상이 아님)
 demo-tracks/
 
 # 코드까지 포함된 상세 실행 계획은 저장소에 올리지 않는다 (요약본은 코드 없이 별도 파일로 둔다)
 docs/superpowers/plans/detail*
+
+# 시드 곡 분석 결과(analysis.seed 출력). 저장소에는 두지 않고 on-stage 시드 스크립트에 파일로 넘긴다
+seed-analysis/

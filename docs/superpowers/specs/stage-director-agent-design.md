@@ -60,10 +60,10 @@ Python이 요청으로 받는 컨텍스트: 분석 JSON, 곡 메타(제목·장�
 ### 4.1 분석 작업 (그래프 밖)
 
 1. 업로드 후 Next.js가 `audio_tracks` 행 생성(`analysis_status=pending`). `file_hash`가 같은 본인 곡에 분석 결과가 있으면 재사용하고 끝.
-2. Next.js → Python `POST /analyze {jobId, audioUrl}` → 202.
-3. 프론트가 `GET /api/audio-tracks/{id}`를 폴링. Next.js가 Python `GET /analyze/{jobId}`를 조회해 `running / done / error`와 진행률을 전달한다.
-4. `done`이면 Next.js가 `analysis`를 저장(멱등)하고 `analysis_status=done`. 탭을 닫아도 결과는 Python `jobs`에 7일 보관되어 다음 폴링 때 저장된다.
-5. 시드 곡은 오프라인 스크립트로 미리 분석해 이 경로를 건너뛴다. 분석은 이미 `audio_tracks.analysis`에 있으므로 무거운 분석 작업(librosa·구조 모델)은 돌지 않고, 그래프는 Next.js가 채워주는 컨텍스트만으로 시작한다.
+2. Next.js → Python `POST /analyze {jobId, audioUrl}` → 202 `{jobId, status, progress, result?, error?}`. `jobId` 는 `audio_tracks.id` 이고 `audioUrl` 은 음원 서명 URL 이다. 멱등: 같은 `jobId` 로 다시 부르면 현재 상태를 돌려주고, `error` 일 때만 처음부터 다시 분석한다. `audioUrl` 이 https·443 포트·허용 호스트(Supabase 프로젝트)·공인 IP 조건을 못 지키면 큐에 넣지 않고 422 `{detail:"invalid_audio_url"}`.
+3. 프론트가 `GET /api/audio-tracks/{id}`를 폴링. Next.js가 Python `GET /analyze/{jobId}`를 조회해 `queued / running / done / error`와 `progress`(0~1, 내려받기 전 0.1 · 후 0.4 · 완료 1.0 의 단계 단위)를 전달한다. `queued` 는 분석 풀(동시 1건)이 차서 순서를 기다리는 중이다. 모르는 작업(그래프 작업 id 포함)은 404 `{detail:"job_not_found"}`.
+4. `done`이면 `result` 는 `{analysis, fileHash}`(`analysis` 는 §5 `audio_tracks.analysis` 모양, `fileHash` 는 내려받은 바이트의 sha256). Next.js가 `analysis`를 저장(멱등)하고 `analysis_status=done`. 탭을 닫아도 결과는 Python `jobs`에 마지막 갱신 후 7일 보관되어 다음 폴링 때 저장된다. `error` 의 코드: `audio_unavailable`(내려받기 실패·차단) · `decode_failed`(오디오로 읽을 수 없음) · `too_long`(300초 + 1초 초과) · `internal_error` · `interrupted`(처리 중 서버가 재시작됨, 같은 `jobId` 로 `POST /analyze` 를 다시 부르면 처음부터 재시도). 음원 파일 크기는 30MiB 까지 받는다 — 음원 버킷의 크기 상한도 이 값 이하로 맞춘다. 지원하는 업로드 형식은 mp3·wav·flac·ogg 이다. m4a·aac 는 libsndfile 에 AAC 가 없어 디코딩할 수 없고 `decode_failed` 로 끝나므로, 음원 버킷은 이 MIME 타입만 허용하고 30MiB·300초 상한을 둔다.
+5. 시드 곡은 오프라인 스크립트(`python -m stage_director.analysis.seed`)로 미리 분석해 이 경로를 건너뛴다. 스크립트는 곡마다 `{fileName, fileHash, durationSec, analysis}` JSON 을 내보내고(Python 은 Supabase 에 쓰지 않는다), on-stage 시드 스크립트가 이 값을 `audio_tracks` 의 `file_hash`·`duration_sec`·`analysis` 로 넣는다. 결과의 모양은 업로드 분석과 같은 코드가 만든다. 분석은 이미 `audio_tracks.analysis`에 있으므로 무거운 분석 작업(librosa·구조 모델)은 돌지 않고, 그래프는 Next.js가 채워주는 컨텍스트만으로 시작한다.
 
 ### 4.2 시퀀스 생성 작업
 
@@ -82,7 +82,11 @@ Python 쪽 `/runs` 프로토콜은 4단계(사람 개입)에서 구현했다. �
 | `GET /runs/{threadId}` → 200 `{status, interrupt?, result?, error?}` | `waiting_input` 이면 현재 interrupt 페이로드, `done` 이면 `jobs.result`(`{sections, items, issues}`)를 돌려준다. 모르는 스레드(존재한 적 없거나 보존 정책으로 삭제)는 404 `thread_not_found` — Next.js 가 410 으로 바꾸고 초안 행을 삭제한다 |
 | `POST /runs/{threadId}/resume {interruptId, kind, payload}` → 202 | 409: `not_waiting_input`(더블 클릭 포함) · `stale_interrupt` · `kind_mismatch` / 422: `invalid_sections` · `invalid_targets` / 404 |
 
-`context` 는 기존 곡 전체 요청(`track`, `artist`, `presets`, `analysis`, `durationSec`)에 선택 필드 `audioUrl`(음원 서명 URL, https, 무드 해석용)을 더한 것이다.
+`context` 는 기존 곡 전체 요청(`track`, `artist`, `presets`, `analysis`, `durationSec`)에 선택 필드 `audioUrl`(음원 서명 URL, 무드 해석용)을 더한 것이다. `audioUrl` 이 https·443 포트·허용 호스트·공인 IP 조건을 못 지키면 무드 해석을 건너뛴다(요청은 거절하지 않는다. 무드는 비치명적).
+
+`status` 는 `queued / running / waiting_input / done / error` 다. `queued` 는 그래프 풀(동시 2건)이 차서 시작을 기다리는 상태이고, 프론트는 `running` 처럼 보여 주되 "대기 중" 문구를 쓸 수 있다. 처리 중에 서버가 죽거나 재시작되면 새 인스턴스가 켜질 때 그 작업이 `error` / `interrupted` 로 바뀌고, 같은 `threadId` 로 `POST /runs` 를 다시 부르면 마지막 체크포인트에서 이어진다. 분석 작업 id 로 `/runs` 를 부르면 404 `thread_not_found` 다.
+
+**승인된 시퀀스는 Python 을 부르지 않는다.** `done` 이 된 스레드의 `jobs` 행은 7일 뒤 지워지고(§6.4 규칙 3) 체크포인트는 24시간 뒤 지워진다. Next.js 는 `approved` 시퀀스 행을 Supabase 에서만 읽는다. Python 의 404 를 410 으로 바꿔 행을 지우는 경로는 `draft` 행에만 쓴다.
 
 Python 엔드포인트는 모두 `X-Internal-Key` 필수이며 키는 서버 환경변수에만 둔다. `POST /runs`는 같은 `threadId`로 다시 호출되면 멱등하다(이미 있으면 현재 상태 반환, 마지막 체크포인트에서 재개 필요 시에만 재실행).
 
@@ -100,7 +104,7 @@ DDL은 on-stage 마이그레이션에 들어간다(§11). 이 저장소는 계�
 | title, genre text, mood_keywords text[] | 곡 메타 |
 | storage_path text | 음원 버킷 경로 |
 | file_hash text | sha256. 분석 캐시 키 |
-| duration_sec numeric | 최대 180 |
+| duration_sec numeric | 최대 300 |
 | analysis jsonb null, analysis_status text | `pending / running / done / error` |
 | created_at | |
 
@@ -132,7 +136,7 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 - 첫 항목 `startSec = 0`, 마지막 `endSec = duration_sec`, `items[i].endSec == items[i+1].startSec` (빈틈·겹침 없음 → 재생 시 `currentTime`으로 구간 조회가 단순해짐)
 - `0 <= transitionMs <= (endSec - startSec) * 1000`
 
-**음원 Storage 버킷** 신설: audio MIME 허용 목록과 3분 곡 기준 크기 상한. 업로드는 `/api/gallery/upload-url`의 서명 URL 패턴을 복제한다.
+**음원 Storage 버킷** 신설: audio MIME 허용 목록(mp3·wav·flac·ogg)과 크기 상한 30MiB(5분 mp3 가 들어가는 값). 업로드는 `/api/gallery/upload-url`의 서명 URL 패턴을 복제한다.
 
 ## 6. 체크포인터와 그래프 상태
 
@@ -141,11 +145,13 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 | 테이블 | 소유 | 내용 |
 | --- | --- | --- |
 | `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`, `checkpoint_migrations` | LangGraph | `setup()`이 생성. 스키마를 직접 설계하지 않는다 |
-| **`jobs`** | 이 프로젝트 | `id text pk`(`thread_id`), `status`(`running/waiting_input/done/error`), `result jsonb null`, `error text null`, `updated_at`. 4단계에는 그래프 작업만 있어 `kind`·`created_at`·`progress` 컬럼을 두지 않는다 — 분석 작업(`jobId`)을 넣는 5단계에서 `kind`(`analysis`/`graph`)와 `progress` 등을 추가한다 |
+| **`jobs`** | 이 프로젝트 | `id text pk`(그래프 작업은 `thread_id`, 분석 작업은 `jobId`), `kind`(`graph`/`analysis`, 기본 `graph`), `status`(`queued/running/waiting_input/done/error`), `progress real null`(분석 작업만), `result jsonb null`, `error text null`, `updated_at`. `created_at` 은 쓸 곳이 없어 두지 않는다 |
 
-`jobs`가 필요한 이유: 백그라운드 실행 중 Python 프로세스가 죽으면 체크포인트만으로는 "실행 중이었는지"를 알 수 없다. 서비스 시작 시 `status=running`인 행을 `error(interrupted)`로 바꾸고, 사용자가 "다시 시도"하면 같은 `thread_id`로 마지막 체크포인트에서 재개한다.
+`jobs`가 필요한 이유: 백그라운드 실행 중 Python 프로세스가 죽으면 체크포인트만으로는 "실행 중이었는지"를 알 수 없다. 서비스가 시작될 때 `queued`·`running` 으로 남은 작업(그래프·분석 모두)은 `error(interrupted)`로 바뀐다. 사용자가 "다시 시도"하면 같은 `thread_id`로 마지막 체크포인트에서 재개한다(분석 작업은 처음부터). 인스턴스 1대를 전제한다: 배포 중 옛 인스턴스가 잠시 살아 있으면 새 인스턴스가 그 작업도 `interrupted` 로 만들지만 옛 인스턴스는 곧 내려가므로 영향이 없고, 줄 서 있던(`queued`) 작업은 스레드가 깨어나도 `queued → running` 전이가 실패해 실행되지 않는다. 인스턴스가 여러 대가 되면 heartbeat(맡은 프로세스가 주기적으로 갱신하고 끊기면 죽은 것으로 판정)나 별도 워커가 필요하다. `waiting_input` 은 스레드가 필요 없어 영향이 없다.
 
-상태 판정(그래프 작업): `jobs.status` 는 Runner 가 전이 시점(시작 `running`, interrupt 도달 `waiting_input`, 종료 `done`, 예외 `error`)에 조건부 UPDATE 로 직접 기록한다. 대기 중인 interrupt 페이로드는 체크포인트의 `tasks[].interrupts` 에서 읽는다. `jobs` 에는 `progress`·`kind`·`created_at` 컬럼이 없다(분석 작업이 필요해지면 추가).
+스키마 변경은 `CREATE TABLE IF NOT EXISTS` 로 4단계 모양을 만든 뒤 컬럼마다 `ALTER TABLE jobs ADD COLUMN IF NOT EXISTS` 를 이어 실행하는 방식이다(서비스 시작 시, advisory lock 으로 인스턴스 동시 기동을 직렬화). 새 DB 도 4단계까지 쓰던 DB 도 같은 경로를 타고 기존 행은 그대로 남는다. 컬럼을 더할 때는 `jobs.py` 의 `_DDL` 끝에 한 줄을 추가한다.
+
+상태 판정(그래프 작업): `jobs.status` 는 Runner 가 전이 시점(시작 `running`, interrupt 도달 `waiting_input`, 종료 `done`, 예외 `error`)에 조건부 UPDATE 로 직접 기록한다. 대기 중인 interrupt 페이로드는 체크포인트의 `tasks[].interrupts` 에서 읽는다. 분석 작업은 같은 표에서 `kind=analysis` 로 구별하며 `queued → running → done / error` 로 흐른다. 그래프 작업의 `progress` 는 비어 있다.
 
 ### 6.2 `thread_id`
 
@@ -176,18 +182,29 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 **규칙 1. 승인된 스레드: 승인 24시간 후 체크포인트만 삭제**
 
-- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 4단계에서는 `jobs` 의 모든 행이 그래프 작업이다).
+- 대상: 승인이 끝난 그래프 작업(`jobs.status=done`. 이 규칙은 그래프 작업(`kind=graph`)에만 적용된다).
 - 기준 시각: `jobs.status`가 `done`이 된 시각(= 사용자가 승인해 최종 시퀀스가 나온 시점). Python은 Supabase의 `approved_at`을 볼 수 없으므로 이 시각을 쓴다.
 - 삭제 범위: LangGraph 체크포인트(실행 기록)만 `adelete_thread`로 지운다. 승인본은 이미 `stage_sequences.items`에 있고 이후 조회는 그 행을 읽으므로 체크포인트는 필요 없다.
 - 24시간을 두는 이유: 승인 직후 Next.js가 최종 시퀀스를 저장하다 실패해도 같은 스레드에서 결과를 다시 받아 저장할 수 있게 하는 여유 시간이다.
 
 **규칙 2. 승인되지 않은 초안(draft): 7일 방치되면 통째로 삭제**
 
-- 대상: 승인되지 않은 그래프 작업(`jobs.status`가 `running / waiting_input / error`).
+- 대상: 승인되지 않은 그래프 작업(`jobs.status`가 `queued / running / waiting_input / error`).
 - 기준 시각: `jobs.updated_at`(마지막 활동). 재개나 피드백이 있으면 갱신되므로 7일간 아무 활동이 없을 때만 해당한다.
 - 삭제 범위: Python 쪽은 체크포인트와 `jobs` 행을 모두 지운다. Supabase의 `draft` 행은 Python이 지우지 못하므로(Supabase에 쓰지 않는다), 다음 조회 때 Next.js가 지운다. 스레드가 삭제된 초안을 조회하면 Python이 스레드를 모른다고 답하고, Next.js가 410을 돌려주며 초안 행을 삭제한다. UI는 "세션이 만료되었습니다. 다시 시작하세요"를 표시한다.
 
-**참고: 분석 작업 결과.** 분석 작업(5단계에서 `kind=analysis` 로 추가)의 `jobs.result`는 완료 후 7일 보관한다. 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 것이며(§4.1), 위 두 규칙과 별개다.
+**규칙 3. 승인된 스레드의 `jobs` 행: `done` 7일 후 삭제**
+
+- 대상: `jobs.status=done` 인 그래프 작업. 기준 시각은 `jobs.updated_at`(= `done` 이 된 시각).
+- 삭제 범위: `jobs` 행. 체크포인트는 규칙 1 로 이미 24시간에 지워졌다. 이 규칙이 없으면 완료된 작업의 행이 영원히 쌓이고 규칙 1 이 매번 같은 스레드를 다시 훑는다.
+- 이후 이 `threadId` 를 조회하면 404 다. 승인본은 Supabase 에 있으므로 Next.js 는 `approved` 행에 대해 Python 을 부르지 않는다(§4.2).
+
+**규칙 4. 분석 작업: 7일 후 삭제**
+
+- 대상: `kind=analysis` 인 모든 행(`queued / running / done / error`). 기준 시각은 `jobs.updated_at`.
+- 삭제 범위: `jobs` 행만(체크포인트가 없다). 탭을 닫아도 다음 폴링 때 결과가 저장되게 하기 위한 보관 기간이며(§4.1), 7일 넘게 `queued`·`running` 인 행은 죽은 작업이다.
+
+**실행 시점.** 네 규칙 모두 서비스 시작 시, 실행 중 6시간마다(`RETENTION_INTERVAL_SEC`), 주기 스크립트 `python -m stage_director.retention` 에서 돈다. 유휴 시 0대로 줄었다 켜지는 호스팅에서는 인스턴스가 켜질 때의 시작 시 실행이 사실상 정기 실행이다.
 
 ## 7. 검증
 
@@ -205,10 +222,14 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 | 상황 | 동작 |
 | --- | --- |
-| LLM 호출 실패 | 호출마다 주 모델 실패 시 예비 모델(`GEMINI_FALLBACK_MODEL`)로 1회 더 시도하고, 노드 단위 재시도 2회(무드 해석도 2회) → 실패 시 `jobs.status=error`와 메시지. 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
+| LLM 호출 실패 | 호출마다 주 모델 실패 시 예비 모델(`GEMINI_FALLBACK_MODEL`)로 1회 더 시도하고, 노드 단위 재시도 2회(무드 해석도 2회) → 실패 시 `jobs.status=error`와 메시지(최종 실패가 429 RESOURCE_EXHAUSTED 이면 `llm_quota_exceeded`, 분당·하루 한도 구분 없음. 그 밖은 `llm_failed`). 사용자가 "다시 시도"하면 마지막 체크포인트에서 재개 |
+| `/propose` 동기 호출 | 최악 약 6분(주 모델 60초 + 예비 모델 60초, 노드 재시도 3회)이라 프록시·서버리스 시간 제한에 걸린다. 배포 환경에서 Next.js 는 호출하지 않고 시퀀스 생성은 `/runs` 를 쓴다 |
 | 구조 출력이 스키마 불일치 | 1층에서 폴백·clamp, 필드 하나가 깨져도 나머지 유지(필드별 방어) |
 | Python 서비스 다운 | Next.js가 502. 시드 곡의 캐시된 예시 시퀀스로 폴백(기획서 §11, Next.js 측 구현) |
 | 분석 실패 | `analysis_status=error`, 사용자에게 재시도 또는 에너지 곡선 기반 경계 제안 모드 안내(1단계 스파이크 결과에 따라 확정) |
+| Python 프로세스가 작업 도중 죽음(배포·재시작 포함) | 새 인스턴스가 켜질 때 `queued`·`running` 작업이 `error(interrupted)`. 다시 시도하면 그래프는 마지막 체크포인트에서, 분석은 처음부터 이어진다(§6.1) |
+| Gemini 분당 한도 | Python 이 모델마다 슬라이딩 윈도우(`GEMINI_RPM`, 기본 4 — 무료 키 한도가 모델당 분당 5회)로 요청 간격을 조절한다. 대기하는 동안 작업은 `running` 으로 보인다. 429 가 그래도 나면 위 "LLM 호출 실패" 행의 예비 모델·재시도를 탄다 |
+| 음원 URL 이 허용되지 않음(`/analyze`) | 422 `invalid_audio_url`. 그래프의 `audioUrl` 은 무드 해석만 건너뛴다 |
 | 낡은 resume, 더블 클릭 | 409 |
 | 스레드 만료 | 410, 초안 행 정리 |
 | 한도 초과 | Next.js 레이트 리밋(계정·IP, 일일 한도) |
@@ -250,7 +271,7 @@ LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. G
 | on-stage: API 라우트 | `/api/sequences*`, `/api/audio-tracks*`, Python 중계, 레이트 리밋 |
 | on-stage: README | "백엔드 서버 분리 없음" 항목을 분리 근거와 함께 갱신(기획서 §9) |
 | 기획서 갱신 | 노드 A 제거(D5), `tracks` → `audio_tracks`(D7), "`mergeStageState`가 clamp한다" 가정 삭제(§2), 체크포인터 DB 분리(D2)와 `jobs`, 폴링 프로토콜(D4) 반영 |
-| 음원 약관 확인 | 기획서 §4의 체크박스 그대로 유지 |
+| 음원 약관 확인 | 확인 완료(기획서 §4): 음원은 저장소에 올리지 않고 Supabase Storage 에만 둔다. 시드 곡은 Storage 에 한 번 올리고 `audio_tracks` 행(`user_id` NULL)을 만든다. 저장소를 공개하면 on-stage README 에 "오디오는 AI 생성물이며 MIT 라이선스 대상이 아니다"를 적는다 |
 
 ## 12. 구현 계획(writing-plans)에 대한 제약
 
@@ -267,4 +288,6 @@ LLM provider는 클라이언트를 주입하는 인터페이스 뒤에 둔다. G
 | LLM provider | Gemini, 클라이언트 주입 구조. 텍스트 입력 구조화 출력은 싱글 제안 계획에서 확정(기본 모델 `gemini-3.8-flash`, 환경변수 `GEMINI_MODEL` 로 교체). 오디오 입력 무드 해석은 4단계에서 확정: 곡 전체 오디오 + 구간 시각 목록을 Gemini 에 1회 호출해 구간별 분위기를 받는다(`mood.py`). 실패는 비치명적(`mood=""`)이고, 결과는 interrupt #1 화면에서 사람이 고칠 수 있으며 `Section.mood` 로 propose 프롬프트에 들어간다 | 텍스트·오디오: 확정 |
 | 구조 분석 모델 | **에너지 곡선 기반 휴리스틱으로 확정, all-in-one 류는 도입하지 않는다.** 실제 곡 2개(`나만의_작은_우주`, `burn it up`)를 사람이 직접 청취해 검증: 브릿지 전후처럼 뚜렷한 전환(실측 에너지 변화 35~54%)은 정확히 잡지만, 벌스↔코러스처럼 미세한 전환(실측 3~20%, 임계값 35% 미달)은 놓친다 — 최근 믹싱의 라우드니스 압축 때문에 벌스·코러스 음량 차가 작아 에너지만으로는 원천적으로 구분이 어려움. 구간 개수·순서 등 큰 구조는 두 곡 다 맞았다. 임계값을 낮추면 일부(놓친 것 중 턱걸이 수준)는 잡히지만 노이즈성 과다 분할과 곡 2개로 튜닝하는 과적합 위험이 있어, **한계를 알고 받아들이기로 결정**했다 — 세부 보정은 4단계 interrupt #1(사람이 구간을 보고 직접 수정)에서 흡수한다 | 확정 (시퀀스 그래프 계획 Task 6, 2026-10-02 실제 곡 청취 검증) |
 | 승인본 상한 5개, 승인 후 체크포인트 삭제 24시간, 초안 방치 삭제 7일 | §5·§6.4 값 | 4단계 전 조정 가능 |
-| 호스팅 | 콜드 스타트 없는 플랜 우선 검토(기획서 §9) | 5단계 |
+| 호스팅 | Google Cloud Run(asia-southeast1, Neon 과 같은 지역), 1vCPU·메모리 2GiB, `--no-cpu-throttling`(CPU 항상 할당 — 요청 밖에서도 도는 백그라운드 스레드에 필수), `--max-instances 1`(RPM 제한·resume 락이 프로세스 단위, 요금 폭주 방지), `--min-instances 0`(유휴 시 자동 중지로 비용 최소화), 시크릿은 Secret Manager, 상태 확인은 `/health`, 전용 Postgres 는 Neon. **기획서 §9 의 "콜드 스타트 없는 플랜 우선" 을 비용 때문에 의도적으로 접었다** — 평소에는 첫 요청이 콜드 스타트를 겪고, 발표·면접 당일에만 `--min-instances 1` 로 올린다. 배포 절차·환경변수·비용은 `docs/deploy.md` | 확정 (5단계 계획) |
+| Gemini RPM 기본값 | 모델당 분당 4회(`GEMINI_RPM`). 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값이고, 유료 키면 `GEMINI_RPM` 으로 올린다 | 확정 |
+| 분석 입력 상한 | 파일 30MiB, 길이 300초(+1초), 분석 동시 1건. 300초 분석의 최고 메모리 약 0.8GiB(2GiB 서버에서 충분, macOS 측정) | 확정 |

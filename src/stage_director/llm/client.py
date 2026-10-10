@@ -7,6 +7,10 @@ class LLMError(Exception):
     """LLM 호출이 실패했거나 JSON 으로 읽을 수 없는 응답을 받음. 재시도 대상."""
 
 
+class LLMQuotaError(LLMError):
+    """마지막 시도의 실패가 한도 초과(429 RESOURCE_EXHAUSTED)다. 분당·하루 한도를 구분하지 않는다. 다시 시도해도 같을 수 있다."""
+
+
 class LLMClient(Protocol):
     def generate_json(self, *, system: str, user: str, schema: dict[str, Any]) -> Any:
         """schema(JSON Schema)에 맞는 JSON 하나를 생성해 파싱한 값을 돌려줌. 실패하면 LLMError.

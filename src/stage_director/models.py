@@ -118,10 +118,10 @@ class RunStatus(CamelModel):
     """GET/POST /runs 응답. interrupt·result 는 이미 camelCase 로 직렬화된 dict 이다."""
 
     thread_id: str
-    status: Literal["running", "waiting_input", "done", "error"]
+    status: Literal["queued", "running", "waiting_input", "done", "error"]  # queued: 스레드 풀이 가득 차 순서를 기다리는 중
     interrupt: dict[str, Any] | None = None  # waiting_input 일 때 현재 interrupt 페이로드
     result: dict[str, Any] | None = None  # done 일 때 {sections, items, issues}
-    error: str | None = None  # error 일 때 코드 문자열(llm_failed / internal_error / interrupted)
+    error: str | None = None  # error 일 때 코드 문자열(llm_failed / llm_quota_exceeded / internal_error / interrupted)
 
 
 class SectionsPayload(CamelModel):
@@ -151,3 +151,20 @@ class ApproveResume(CamelModel):
 
 
 ResumeRequest = Annotated[SectionsResume | FeedbackResume | ApproveResume, Field(discriminator="kind")]
+
+
+class AnalyzeCreate(CamelModel):
+    """POST /analyze 본문. job_id 는 Next.js 가 정한 audio_tracks.id."""
+
+    job_id: str = Field(min_length=1, max_length=64)
+    audio_url: str = Field(min_length=1, max_length=2048)  # 서명 URL 은 토큰 때문에 길다
+
+
+class AnalysisStatus(CamelModel):
+    """GET/POST /analyze 응답."""
+
+    job_id: str
+    status: Literal["queued", "running", "done", "error"]
+    progress: float | None = None  # 0.0~1.0. 단계 단위로만 움직인다
+    result: dict[str, Any] | None = None  # done 일 때 {"analysis": {...AnalysisSnapshot camelCase}, "fileHash": sha256}
+    error: str | None = None  # audio_unavailable / decode_failed / too_long / internal_error / interrupted
