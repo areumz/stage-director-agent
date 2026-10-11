@@ -24,7 +24,7 @@ Python 서비스(FastAPI + LangGraph + librosa) 한 대를 Cloud Run 에 올린�
 | `GEMINI_API_KEY` | **Secret Manager** | Gemini API 키 |
 | `DATABASE_URL` | **Secret Manager** | Neon 연결 문자열(`sslmode=require` 포함) |
 | `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL` | 일반 | `--set-env-vars` |
-| `GEMINI_RPM` | 일반 | 모델당 분당 요청 수. **4 로 둔다** — 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값이다. 유료 키로 바꾸면 실제 한도에 맞춰 올린다 |
+| `GEMINI_RPM` | 일반 | 모델당 분당 요청 수. **10 으로 둔다**(유료 Tier 1 기준). 무료 키는 모델당 분당 5회라서 무료 키로 돌릴 때는 4 로 낮춘다. 한도가 다른 등급이면 실제 한도(모델별 RPM, AI Studio 에서 확인)에 맞춘다 |
 | `AUDIO_URL_ALLOWED_HOSTS` | 일반 | Supabase 프로젝트 호스트. 비워 두고 배포하지 않는다 |
 
 시크릿은 이미지·저장소에 넣지 않고 `--set-secrets` 로만 넣는다. `.env` 는 `.dockerignore` 로 이미지에서 빠진다.
@@ -100,7 +100,7 @@ gcloud run deploy stage-director-agent \
   --cpu 1 --memory 2Gi --no-cpu-throttling \
   --min-instances 0 --max-instances 1 \
   --port 8080 --allow-unauthenticated \
-  --set-env-vars GEMINI_MODEL=gemini-3.8-flash,GEMINI_FALLBACK_MODEL=gemini-3.6-flash,GEMINI_RPM=4,AUDIO_URL_ALLOWED_HOSTS=htmfbhgjxgxbhuujfvwm.supabase.co \
+  --set-env-vars GEMINI_MODEL=gemini-3.8-flash,GEMINI_FALLBACK_MODEL=gemini-3.5-flash,GEMINI_RPM=10,AUDIO_URL_ALLOWED_HOSTS=htmfbhgjxgxbhuujfvwm.supabase.co \
   --set-secrets INTERNAL_API_KEY=INTERNAL_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,DATABASE_URL=DATABASE_URL:latest \
   --startup-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=5,failureThreshold=12 \
   --liveness-probe httpGet.path=/health,httpGet.port=8080,periodSeconds=30
@@ -134,7 +134,7 @@ gcloud run services logs read stage-director-agent --region asia-southeast1 --li
 
 ```bash
 # 환경변수 한 개 바꾸기(새 리비전이 만들어진다)
-gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars GEMINI_RPM=30
+gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars GEMINI_RPM=10,GEMINI_FALLBACK_MODEL=gemini-3.5-flash
 # 시크릿 값 교체: 새 버전을 추가하면 :latest 를 쓰는 서비스는 다음 리비전부터 새 값을 쓴다
 printf %s "$NEW_VALUE" | gcloud secrets versions add INTERNAL_API_KEY --data-file=-
 gcloud run services update stage-director-agent --region asia-southeast1 --update-env-vars SECRETS_BUMP=$(date +%s)

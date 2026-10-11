@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
-DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.6-flash"  # 주 모델이 혼잡할 때 쓴다. 주 모델과 같게 두면 예비 시도를 하지 않는다
-DEFAULT_GEMINI_RPM = 4  # 모델당 분당 요청 수. 무료 키 한도가 모델당 분당 5회라서 한 칸 여유를 둔 값. 유료 키면 GEMINI_RPM 으로 올린다. 0 이면 제한하지 않는다
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.5-flash"  # 주 모델이 혼잡할 때 쓴다. 주 모델과 같게 두면 예비 시도를 하지 않는다
+DEFAULT_GEMINI_RPM = 10  # 모델당 분당 요청 수(유료 Tier 1 기준). 무료 키는 모델당 분당 5회라서 로컬에서 무료 키를 쓰면 GEMINI_RPM=4 로 낮춘다. 0 이면 제한하지 않는다
 
 
 @dataclass(frozen=True)

@@ -40,4 +40,4 @@ def test_audio_allowed_hosts_are_split_trimmed_and_lowercased(monkeypatch):
 
 
 def test_default_rpm_stays_under_the_free_key_limit():
-    assert 0 < DEFAULT_GEMINI_RPM < 5  # 무료 키 한도가 모델당 분당 5회. 유료 키면 GEMINI_RPM 으로 올린다
+    assert DEFAULT_GEMINI_RPM == 10  # 유료 Tier 1 기준. 무료 키(모델당 분당 5회)로 돌리면 GEMINI_RPM=4 로 낮춘다
