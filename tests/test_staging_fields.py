@@ -3,7 +3,7 @@
 import pytest
 
 from stage_director.llm.fake import FakeLLM
-from stage_director.prompts import PROPOSAL_SCHEMA, SYSTEM_PROMPT
+from stage_director.prompts import INTENSE_ENERGY_RATIO, PROPOSAL_SCHEMA, SYSTEM_PROMPT
 from stage_director.propose import propose_section
 from stage_director.sequence import BACKDROPS
 from tests.test_propose import llm_output, request
@@ -74,3 +74,11 @@ def test_old_sequence_without_the_fields_is_still_valid():
     old = {"sectionLabel": "x", "startSec": 0, "endSec": 5, "transitionMs": 500, "rationale": "r", "state": propose().item.state.model_dump()}
     item = SequenceItem.model_validate(old)
     assert (item.backdrop, item.dust, item.reflection) == (None, None, None)
+
+
+def test_prompt_maps_energy_ratio_to_backdrop_tiers():
+    from stage_director.gate import CALM_ENERGY_RATIO
+
+    assert f"에너지 비 {CALM_ENERGY_RATIO:g} 이하: gyro" in SYSTEM_PROMPT
+    assert f"{INTENSE_ENERGY_RATIO:g} 초과: laser 또는 cube" in SYSTEM_PROMPT
+    assert CALM_ENERGY_RATIO < INTENSE_ENERGY_RATIO  # 단계가 겹치지 않는다
