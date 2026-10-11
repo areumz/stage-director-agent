@@ -85,6 +85,8 @@ def test_full_flow_confirm_sections_then_approve():
     status = runner.resume("t1", approve(status))
     assert status.status == "done"
     assert len(status.result["items"]) == 2 and len(status.result["sections"]) == 2
+    assert "props" in status.result and status.result["props"] is None  # 오디오 없이 돌렸으니 정하지 않음(null)
+    assert status.result["items"][0]["backdrop"] is None
 
 
 def test_feedback_turn_returns_to_review_with_a_new_interrupt_id():

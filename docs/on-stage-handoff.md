@@ -190,6 +190,7 @@ POST /runs ─▶ queued/running ─▶ waiting_input  [kind: confirm_sections] 
 ```
 
 - `items[i].state` 는 on-stage 의 `StageState` 모양(`contracts/enums_and_constants.md`). `rationale` 은 구간별 연출 이유 문장.
+- **(추가)** `items[i]` 에는 선택 필드 `backdrop`·`dust`·`reflection` 이, 응답 최상위에는 `props` 가 더해졌다. 없으면 `null` 이다. 자세한 뜻은 **추가 G**.
 - `issues` 는 자동 재생성 후에도 남은 **경고**(비어 있을 수 있다). `idx` 는 해당 구간 번호이고 곡 전체 경고는 `null`. `rule` 값: `calm_too_bright`(잔잔한 구간이 너무 밝음), `energy_brightness_direction`(에너지와 밝기 변화 방향이 반대), `color_deviation_without_rationale`(시그니처 컬러에서 벗어났는데 이유 없음), `clamped`(범위 밖 값을 보정함), `invalid_state`(상태가 깨져 기본값으로 대체). 경고가 있어도 승인할 수 있다 — 화면에 경고를 보여 준다.
 - `interruptId = "<threadId>:<revision>:<kind>"`. 화면이 바뀔 때마다 revision 이 올라가므로 **resume 은 항상 방금 받은 interruptId 로** 보낸다.
 
@@ -285,11 +286,11 @@ POST /runs ─▶ queued/running ─▶ waiting_input  [kind: confirm_sections] 
 ## 7. 시간 감각 (UI 문구용)
 
 - **분석:** 5분 곡 기준 측정 자체는 약 2~3초이고, 음원 내려받기와 대기열을 합쳐 대략 수 초~수십 초. 대기열이 없을 때.
-- **시퀀스 생성:** 구간마다 Gemini 호출이 한 번씩 필요하고, 현재 무료 키 기준 **모델당 분당 4회**로 속도를 제한한다. 구간이 8개인 5분 곡은 단순 계산으로 약 2분, 자동 재생성(위반 구간 최대 2회)이 붙으면 3~4분까지 걸린다(구간은 곡이 길수록 늘며 최대 12개). 진행 화면은 "생성 중(2~4분 걸릴 수 있음)" 정도로 안내한다.
+- **시퀀스 생성:** 구간마다 Gemini 호출이 한 번씩 필요하고, 유료(Tier 1) 키 기준 **모델당 분당 10회**로 속도를 제한한다. 구간이 8개인 5분 곡은 단순 계산으로 1분 안팎, 자동 재생성(위반 구간 최대 2회)이 붙으면 2분 안팎까지 걸린다(구간은 곡이 길수록 늘며 최대 12개). 진행 화면은 "생성 중(1~2분 걸릴 수 있음)" 정도로 안내한다. 무료 키로 돌릴 때(분당 4회)는 2~4분이다.
 - **무드 해석(`audioUrl` 을 준 경우):** 첫 구간 확인 화면이 뜨기 전에 오디오 해석이 한 번 돌고, 실패하면 최대 3번(최초 + 2회) 재시도하므로 **최대 40초쯤** 걸릴 수 있다. 그래도 실패하면 무드가 빈 채로 진행한다(에러가 아니다).
 - **재시작 직후 1분쯤은 429 가 한 번 날 수 있다.** 분당 요청 카운터가 서버 메모리에 있어서 재시작·새 리비전 때 초기화되기 때문이다. 서버가 재시도하지만 끝까지 실패하면 `llm_quota_exceeded` 로 나오며, 1분쯤 뒤 다시 시도하면 된다.
 - **주 모델 혼잡(503):** 가끔 일어난다. 서버가 예비 모델·재시도로 흡수하지만 그만큼 느려진다.
-- 유료 키로 바꾸면 `GEMINI_RPM` 환경변수만 올리면 빨라진다(서버 설정, on-stage 변경 없음).
+- 속도는 `GEMINI_RPM` 환경변수로 정한다(서버 설정, on-stage 변경 없음). 지금 배포 목표값은 10 이다.
 
 ## 8. 헬스 체크 (참고)
 
@@ -349,6 +350,7 @@ RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`(시드 공개), 쓰기 `us
 | `audio_track_id` | uuid not null | `audio_tracks` 참조 |
 | `status` | text not null | `draft` \| `approved` |
 | `items` | jsonb null | 승인 전 NULL. `result.items`(아래 `SequenceItem` 배열) |
+| `props` | jsonb null | **(추가)** 곡 전체 소품. `result.props` 에서 오고 사람이 고칠 수 있다. `null` = 정하지 않음, `[]` = 소품 없음(구별해서 저장). 추가 G 참고 |
 | `approved_at` | timestamptz null | |
 | `created_at` | timestamptz | |
 
@@ -360,7 +362,8 @@ RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`(시드 공개), 쓰기 `us
 
 ```json
 { "sectionLabel": "chorus", "startSec": 62.0, "endSec": 114.0, "transitionMs": 2000,
-  "state": { /* StageState */ }, "rationale": "에너지 비 1.12: …" }
+  "state": { /* StageState */ }, "rationale": "에너지 비 1.12: …",
+  "backdrop": "laser", "dust": 80, "reflection": 60 }   // 뒤의 세 필드는 선택(추가 G). 없어도 유효하다
 ```
 
 불변식(Python 게이트와 on-stage 저장 직전이 **같은 규칙**을 쓴다. 경계 비교에는 **±0.001초 허용 오차**를 둔다 — 같은 오차를 안 쓰면 Python 이 통과시킨 시퀀스가 저장 단계에서 거절될 수 있다):
@@ -444,6 +447,44 @@ uv run python scripts/make_example_sequence.py "demo-tracks/Burn-it-up.mp3" --ou
 - **`generatedBy`: `"rule-based example (no LLM)"` 는 에너지 비로 밝기를 정한 개발용 예시**이고 Gemini 가 만든 연출이 아니다(rationale 끝에 "(규칙 기반 예시)"가 붙는다). 실제 모델 결과가 필요하면 `--mode gemini`(무드 해석 포함)로 만든다.
 - 구간 수·라벨은 §추가 B, 밝기 규칙은 §추가 D 와 같다. 예: `Burn-it-up` 은 `intro·chorus·verse·outro` 4구간, 잔잔한 `verse` 는 가운데 스팟만 켜고 밝기 390(≤ 500).
 - 아티스트는 `aurora`(`#9F77DD`)로 고정이다. 다른 아티스트로 보려면 스크립트의 `FIXTURE` 아티스트를 바꾼다.
+
+## 추가 G. 연출 확장 필드 — `backdrop` · `dust` · `reflection` · `props` (추가)
+
+기존 필드와 동작은 그대로이고 **선택 필드만 더했다.** 모두 비어 있어도 된다. 필드가 없는 기존 시퀀스(이미 저장된 승인본, `backdrop` 등이 아예 없는 JSON)도 **그대로 유효**하다 — on-stage 는 키가 없거나 `null` 이면 같은 뜻(= 정하지 않음)으로 읽는다.
+
+**구간마다 (`items[i]` 안, `state` 밖)**
+
+| 필드 | 허용값 | 비어 있을 때 |
+|---|---|---|
+| `backdrop` | `bars` · `tunnel` · `laser` · `gyro` · `cube` · `none` (`none` = 배경 없음) | `null` → on-stage 기본값 |
+| `dust` | 0~100 (먼지 양, 스모크와 같은 방식) | `null` → 기본값 |
+| `reflection` | 0~100 (바닥 반사 세기) | `null` → 기본값 |
+
+- 허용값이 아니면(없는 이름, 범위 밖 숫자, 숫자가 아님) **에러도 경고(`issues`)도 없이 `null`** 이다. 범위 밖 숫자를 0~100 으로 보정하지도 않는다(`state.smoke` 는 보정하지만 이 필드들은 `null`).
+- `state`(StageState)는 건드리지 않았다. 새 필드는 `state` 밖에 둔다.
+- 피드백 재생성에서도 구간 단위로 같이 다시 제안될 수 있다.
+
+**곡 전체 (`result` 최상위, `items` 와 같은 층) — `props`**
+
+```json
+{ "sections": [ … ], "items": [ … ], "issues": [ … ], "props": ["amp", "mic"] }
+```
+
+- 허용값은 `amp` · `drum` · `mic` 의 부분집합이다.
+- **`null` 과 `[]` 는 뜻이 다르다:**
+
+| 값 | 뜻 | on-stage 가 할 일 |
+|---|---|---|
+| `null` (또는 키 없음) | **AI 가 정하지 않았다** | on-stage 기본값을 쓴다 |
+| `[]` | **소품 없음으로 정했다** | 소품을 하나도 놓지 않는다 |
+| `["amp","mic"]` | 이 소품만 쓴다 | 목록의 소품만 놓는다 |
+
+- `props` 는 **무드 해석(오디오) 호출에서만** 받는다(Gemini 호출 수는 늘지 않았다). 그래서 `audioUrl` 없이 시작했거나, 음원을 못 받았거나, 무드 해석이 모두 실패하면 `null` 이다. 응답에 허용값이 아닌 항목이 섞이면 그 항목만 버리고 중복은 합친다. 목록이 아니면 `null`.
+- 리뷰 화면 payload(`kind: "review"`)에도 같은 `props` 가 들어 있다. 구간 확인 화면에서 사람이 고치는 값이 아니고, 피드백 재생성으로 바뀌지도 않는다.
+- **사람이 소품을 빼고 더하는 것은 on-stage 가 맡는다.** Python 의 resume(구간 확인·피드백·승인)에는 `props` 를 받는 형식이 없고 승인 뒤에는 Python 이 `props` 를 다시 조회하지 않는다. 리뷰 화면에서 체크박스로 `amp`·`drum`·`mic` 을 켜고 끄게 하고, 저장할 때 사람이 고른 값을 저장한다. 사람이 한 번도 건드리지 않았으면 받은 값(`null` 포함)을 그대로 저장한다.
+- **저장 위치:** `stage_sequences` 에 `props jsonb null` 컬럼을 추가한다(`contracts/supabase_required.md`). `null` = 정하지 않음(on-stage 기본값), `[]` = 소품 없음, `["amp","mic"]` = 이 소품만. **`null` 과 `[]` 를 같은 값으로 저장하면 안 된다**(빈 배열을 `null` 로 바꾸거나 그 반대로 바꾸는 코드를 주의).
+
+**프롬프트가 달라진 점 (참고):** 구간 사이 대비를 크게 하도록 지시한다 — 잔잔한 구간은 밝기 대략 100~250·느린 배경(gyro 등)·적은 smoke/dust, 격한 구간은 밝기 대략 800~1000·laser/cube·많은 smoke/dust. 밝기 범위(0~1000)와 게이트 규칙(`calm_too_bright` 는 잔잔한 구간 ≤500)은 그대로다.
 
 ## 추가 F. 이 부록이 바꾸지 않은 것
 

@@ -19,7 +19,7 @@ TRACK = Track(title="나만의 작은 우주", genre="K-pop", mood_keywords=["�
 
 def interpret(response):
     llm = FakeLLM(response)
-    return interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK), llm
+    return interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK).moods, llm
 
 
 def test_returns_one_mood_per_section_in_order_with_one_audio_call():
@@ -60,14 +60,14 @@ def sleeps(monkeypatch):
 
 def test_llm_failure_is_not_fatal_after_retries(sleeps):
     llm = FakeLLM(*[LLMError("down")] * (MOOD_MAX_RETRIES + 1))
-    assert interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK) == ["", ""]
+    assert interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK).moods == ["", ""]
     assert len(llm.calls) == MOOD_MAX_RETRIES + 1
     assert sleeps == [MOOD_RETRY_DELAY_SEC * (i + 1) for i in range(MOOD_MAX_RETRIES)]  # 점점 늘려 가며 기다린다
 
 
 def test_transient_failure_is_retried_and_then_succeeds(sleeps):
     llm = FakeLLM(LLMError("503 UNAVAILABLE"), {"moods": ["잔잔", "벅참"]})
-    assert interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK) == ["잔잔", "벅참"]
+    assert interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK).moods == ["잔잔", "벅참"]
     assert len(llm.calls) == 2
     assert sleeps == [MOOD_RETRY_DELAY_SEC]
 
@@ -77,3 +77,35 @@ def test_failure_reason_is_logged(sleeps, caplog):
     with caplog.at_level(logging.WARNING, logger="stage_director.mood"):
         interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK)
     assert "503 UNAVAILABLE" in caplog.text
+
+
+# ── 곡 전체 소품(props) ───────────────────────────────────────
+
+
+def props_of(response):
+    return interpret_moods(FakeLLM(response), b"audio", "audio/mpeg", SECTIONS, TRACK).props
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        ({"moods": ["a", "b"]}, None),  # 필드 없음 = 정하지 않음
+        ({"moods": ["a", "b"], "props": []}, []),  # 소품 없음
+        ({"moods": ["a", "b"], "props": ["mic", "amp"]}, ["mic", "amp"]),  # 허용값
+        ({"moods": ["a", "b"], "props": ["amp", "amp", "guitar", 3]}, ["amp"]),  # 잘못된 항목은 버리고 중복은 합친다
+        ({"moods": ["a", "b"], "props": "amp"}, None),  # 목록이 아니면 None
+        ({"moods": ["a", "b"], "props": None}, None),
+    ],
+)
+def test_props_distinguishes_undecided_from_empty(response, expected):
+    assert props_of(response) == expected
+
+
+def test_props_is_none_when_all_attempts_fail(sleeps):
+    llm = FakeLLM(*[LLMError("down")] * (MOOD_MAX_RETRIES + 1))
+    assert interpret_moods(llm, b"audio", "audio/mpeg", SECTIONS, TRACK).props is None
+
+
+def test_props_adds_no_extra_llm_call():
+    _, llm = interpret({"moods": ["a", "b"], "props": ["drum"]})
+    assert len(llm.calls) == 1 and "props" in llm.calls[0]["schema"]["properties"]

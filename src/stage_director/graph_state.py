@@ -30,6 +30,7 @@ class FeedbackEntry(TypedDict):
 class GraphState(TypedDict, total=False):
     request: SequenceRequest  # 시작 시 1회 설정, 이후 불변
     sections: list[Section]  # detect 가 만들고, mood 가 무드를 채우고, confirm_sections 가 사람이 고친 값으로 교체
+    props: list[str] | None  # 곡 전체 소품. mood 노드가 한 번 채운다. 없음/None = 정하지 않음, [] = 소품 없음
     # idx 단위 병합. merge_proposals 는 값 타입을 가리지 않으므로(dict 를 합칠 뿐) SequenceItem 대신
     # SectionProposal 을 담아 energy_ratio·issues 를 assemble 의 곡 전체 재검사까지 들고감.
     proposals: Annotated[dict[int, SectionProposal], merge_proposals]

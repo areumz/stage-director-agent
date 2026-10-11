@@ -72,7 +72,8 @@ def test_negative_transition_is_reported():
 
 def test_item_serializes_with_the_camel_case_keys_of_the_spec():
     dumped = json.loads(item(0, 10, 500, "chorus").model_dump_json(by_alias=True))
-    assert set(dumped) == {"sectionLabel", "startSec", "endSec", "transitionMs", "state", "rationale"}
+    assert set(dumped) == {"sectionLabel", "startSec", "endSec", "transitionMs", "state", "rationale", "backdrop", "dust", "reflection"}
+    assert dumped["backdrop"] is None and dumped["dust"] is None and dumped["reflection"] is None  # 선택 필드는 비면 null
     assert dumped["sectionLabel"] == "chorus"
 
 

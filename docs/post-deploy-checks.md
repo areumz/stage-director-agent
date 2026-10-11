@@ -133,7 +133,7 @@ api $URL/analyze/nope -w '\nHTTP %{http_code}\n'
 
 재배포(빌드 포함)를 **먼저** 끝낸 뒤에 한다. 이 장은 새 리비전을 **빌드 없이 환경변수만 바꿔서** 만든다(20~40초). 필요한 것: 0장의 `URL`·`KEY`·`api`, 3장의 `AUDIO`와 **`done` 이 된 분석의 `JOB`**. 저장소 루트에서 실행한다.
 
-왜 이렇게 하나: 분석은 몇 초면 끝나서 새 인스턴스가 켜지는 순간에 겹치기 어렵다. 그래프의 제안 단계는 무료 키(분당 4회)에서 1분 안팎 걸려 확실히 겹친다. 그래서 **긴 그래프 작업을 걸어 두고** 그 사이에 새 리비전을 만들고, 분석은 여러 건을 줄 세워 같이 본다.
+왜 이렇게 하나: 분석은 몇 초면 끝나서 새 인스턴스가 켜지는 순간에 겹치기 어렵다. 그래프의 제안 단계는 구간 수와 `GEMINI_RPM` 에 따라 수십 초~1분쯤 걸려 보통 겹친다(RPM 10 이면 짧아지니 안 겹치면 구간이 많은 곡으로 건다). 그래서 **긴 그래프 작업을 걸어 두고** 그 사이에 새 리비전을 만들고, 분석은 여러 건을 줄 세워 같이 본다.
 
 **Step 1 — 끊기지 않아야 할 초안 만들기** (구간 확인 화면까지만 진행해 둔다)
 
@@ -241,6 +241,7 @@ api $URL/runs/$TID | jq '{status, sectionCount: (.result.items|length), issueCou
 ```
 
 기대 결과: `202` → `waiting_input`(confirm_sections) → resume `202` → `queued/running` → `waiting_input`(kind `review`, items 있음) → approve `202` → `done`, `items` 가 구간 수(2)만큼, 각 항목의 `state` 가 StageState 모양.
+새 필드: `api $URL/runs/$TID | jq -c '{props: .result.props, items: [.result.items[] | {backdrop, dust, reflection}]}'` 로 각 항목에 `backdrop`·`dust`·`reflection` 키가 있고(값은 허용값 또는 `null`), 최상위 `props` 가 있는지 본다(`audioUrl` 을 줬으면 `["amp",…]` 또는 `[]`, 안 줬으면 `null`).
 낡은 interruptId 로 resume → `409 stale_interrupt`, 이미 처리된 뒤 같은 resume 을 다시 보내면 `409 not_waiting_input` 이다.
 
 **도중 새 리비전**(끊김과 이어서 하기)은 위 **4장**에서 분석·초안 유지 확인과 함께 한다.

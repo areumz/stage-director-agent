@@ -54,7 +54,7 @@ def _user_prompt(req: ProposeRequest, bpm: float, energy_ratio: float, onset_rat
     if req.feedback:
         lines += ["", "## 사용자 피드백 (수정 요청)"]
         if req.previous:
-            previous = req.previous.model_dump(mode="json", include={"state", "rationale"})
+            previous = req.previous.model_dump(mode="json", include={"state", "rationale", "backdrop", "dust", "reflection"})
             lines.append(f"이전 제안: {json.dumps(previous, ensure_ascii=False)}")
         lines.append(f"피드백: {req.feedback}")
     return "\n".join(lines)
@@ -95,6 +95,9 @@ def propose_section(llm: LLMClient, req: ProposeRequest) -> SectionProposal:
         transition_ms=int(min(DEFAULT_TRANSITION_MS, (s.end_sec - s.start_sec) * 1000)),
         state=state,
         rationale=rationale if isinstance(rationale, str) else "",
+        backdrop=raw.get("backdrop"),  # 허용값 검사는 SequenceItem 이 한다(아니면 None)
+        dust=raw.get("dust"),
+        reflection=raw.get("reflection"),
     )
     issues += run_gate([item], [energy_ratio], req.artist.color)
     return SectionProposal(item=item, energy_ratio=energy_ratio, issues=[Issue(rule=i.rule, message=i.message) for i in issues])

@@ -97,6 +97,7 @@ RLS: 읽기 `user_id IS NULL OR user_id = auth.uid()`. 쓰기 `user_id = auth.ui
 | `audio_track_id` | uuid not null | `audio_tracks` 참조 |
 | `status` | text not null | `draft` \| `approved` |
 | `items` | jsonb null | 승인 전 NULL. `SequenceItem` 배열 (`src/stage_director/sequence.py`) |
+| `props` | jsonb null | **(추가)** 곡 전체 소품. `result.props` 에서 오고 사람이 on-stage 에서 고칠 수 있다. `null` = 정하지 않음(on-stage 기본값), `[]` = 소품 없음, 그 밖에는 `amp`·`drum`·`mic` 의 부분집합. `null` 과 `[]` 를 구별해서 저장한다 |
 | `approved_at` | timestamptz null | |
 | `created_at` | timestamptz | |
 

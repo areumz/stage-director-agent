@@ -128,7 +128,7 @@ def print_answering_model(client: GeminiClient) -> None:
 def run_mood(client: GeminiClient, data, mime, sections, track) -> tuple[list[str], float]:
     """앱의 무드 해석(mood.interpret_moods)을 그대로 호출한다. 실패해도 예외 없이 빈 문자열로 돌아오는 것이 앱의 동작이다."""
     start = time.perf_counter()
-    moods = interpret_moods(client, data, mime, sections, track)
+    moods = interpret_moods(client, data, mime, sections, track).moods
     return moods, time.perf_counter() - start
 
 

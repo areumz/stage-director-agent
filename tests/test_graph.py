@@ -183,6 +183,20 @@ def test_mood_is_interpreted_before_the_pause():
     assert llm.calls[0]["audio_bytes"] == 5
 
 
+@pytest.mark.parametrize("props, expected", [(["amp", "mic"], ["amp", "mic"]), ([], []), (None, None)])
+def test_song_props_come_from_the_mood_call_and_reach_the_state(props, expected):
+    output = {"moods": ["잔잔", "폭발적"], **({} if props is None else {"props": props})}
+    llm = FakeLLM(output)
+    graph, config, _ = start(llm, analysis=TWO_SECTION_ANALYSIS, audio_url="https://x/a.mp3", fetch=lambda url: (b"audio", "audio/mpeg"))
+    assert graph.get_state(config).values["props"] == expected
+    assert len(llm.calls) == 1  # 호출 수는 그대로
+
+
+def test_props_is_undecided_without_audio():
+    graph, config, _ = start(FakeLLM(), analysis=TWO_SECTION_ANALYSIS)
+    assert graph.get_state(config).values.get("props") is None
+
+
 def test_mood_failure_does_not_block_the_run(caplog):
     def broken(url):
         raise AudioError("down")
