@@ -135,7 +135,7 @@ class Runner:
         def dump(models):
             return [m.model_dump(by_alias=True, mode="json") for m in models]
 
-        return {"sections": dump(values["sections"]), "items": dump(values["final_items"]), "issues": dump(values["final_issues"])}
+        return {"sections": dump(values["sections"]), "items": dump(values["final_items"]), "issues": dump(values["final_issues"]), "props": values.get("props")}
 
     def _resume_value(self, thread_id: str, pending: dict[str, Any], req: ResumeRequest) -> dict[str, Any]:
         state = self._graph.get_state(self._config(thread_id)).values

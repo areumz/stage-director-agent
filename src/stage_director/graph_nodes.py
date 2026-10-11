@@ -50,8 +50,8 @@ def make_mood_node(llm: LLMClient, fetch: Callable[[str], tuple[bytes, str]] = f
         except AudioError as e:
             log.warning("음원을 받지 못해 무드 해석을 건너뛴다: %s", e)
             return {}
-        moods = interpret_moods(llm, audio, mime_type, state["sections"], req.track)
-        return {"sections": [s.model_copy(update={"mood": m}) for s, m in zip(state["sections"], moods)]}
+        moods, props = interpret_moods(llm, audio, mime_type, state["sections"], req.track)
+        return {"sections": [s.model_copy(update={"mood": m}) for s, m in zip(state["sections"], moods)], "props": props}
 
     return mood_node
 
@@ -168,6 +168,7 @@ def review_node(state: GraphState, config: RunnableConfig) -> dict:
             "kind": "review",
             "items": [i.model_dump(by_alias=True, mode="json") for i in state["final_items"]],
             "issues": [i.model_dump(by_alias=True, mode="json") for i in state["final_issues"]],
+            "props": state.get("props"),
         }
     )
     if answer["action"] == "feedback":

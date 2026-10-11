@@ -128,8 +128,11 @@ RLS: 읽기 `user_id is null or user_id = auth.uid()`(시드 공개, `gallery_im
 
 ```json
 { "sectionLabel": "chorus", "startSec": 42.3, "endSec": 71.8,
-  "transitionMs": 2000, "state": { "...": "StageState" }, "rationale": "..." }
+  "transitionMs": 2000, "state": { "...": "StageState" }, "rationale": "...",
+  "backdrop": "laser", "dust": 80, "reflection": 60 }
 ```
+
+`backdrop`(`bars`·`tunnel`·`laser`·`gyro`·`cube`·`none`)·`dust`(0~100)·`reflection`(0~100)는 **선택 필드**다. 없거나 허용값이 아니면 에러 없이 `null`(on-stage 기본값)이고 필드가 없는 기존 시퀀스도 유효하다. 곡 전체 `props`(`amp`·`drum`·`mic` 의 부분집합)는 `/runs` 결과 최상위에 두며 무드 해석 호출에서 받는다. `null` = AI 가 정하지 않음, `[]` = 소품 없음. 상세는 `docs/on-stage-handoff.md` 추가 G.
 
 불변식(검증 게이트와 Next.js 저장 직전에 동일하게 검사):
 - 배열 순서 = 시간 순서, `startSec < endSec`
