@@ -8,7 +8,8 @@ A **human-in-the-loop agent service** that analyzes a music track, proposes per-
 
 ## 데모 / Demo
 
-<!-- 스크린샷·GIF 를 넣을 자리 / Place screenshots or GIFs here -->
+![무대 연출 에이전트 · 화면](public/screenshots/stage-director-agent-01.png)
+![무대 연출 에이전트 · 시연](public/screenshots/stage-director-agent-02.gif)
 
 > 🔗 **라이브 데모 / Live demo**: [on-stage-nine.vercel.app/staff/login](https://on-stage-nine.vercel.app/staff/login)
 > 스태프 계정으로 로그인하면 무대 연출 에이전트를 사용할 수 있습니다.
