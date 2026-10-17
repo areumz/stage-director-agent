@@ -19,9 +19,6 @@ A **human-in-the-loop agent service** that analyzes a music track, proposes per-
 - ID: `demo@onstage.local`
 - PW: `demo1234`
 
-프론트엔드(on-stage)에서 사용합니다. 이 저장소는 API 서비스만 포함합니다.
-The frontend lives in on-stage; this repository contains only the API service.
-
 * * *
 
 ## 소개 / Introduction
